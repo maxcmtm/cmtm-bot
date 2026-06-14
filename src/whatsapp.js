@@ -72,6 +72,28 @@ export async function sendTemplate(to, templateName, params = []) {
   return { ok: true };
 }
 
+// חיווי "מקליד..." + סימון ההודעה כנקראה. נמשך עד ~25 שניות או עד שליחת תשובה.
+export async function sendTypingIndicator(messageId) {
+  if (!activeToken() || !config.whatsapp.phoneNumberId || !messageId) return;
+  try {
+    await fetch(`${GRAPH}/${config.whatsapp.phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${activeToken()}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: messageId,
+        typing_indicator: { type: "text" },
+      }),
+    });
+  } catch {
+    /* לא קריטי אם נכשל */
+  }
+}
+
 // שליחת הודעת טקסט (session) ללקוח דרך Meta. יבש אם אין טוקן.
 export async function sendText(to, text) {
   if (!activeToken() || !config.whatsapp.phoneNumberId) {

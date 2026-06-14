@@ -7,7 +7,7 @@ import http from "node:http";
 import { config } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { updateLead as fireberryUpdate } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText, activeToken } from "./whatsapp.js";
+import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator } from "./whatsapp.js";
 import {
   alreadyProcessed,
   getHistory,
@@ -46,6 +46,7 @@ async function processWhatsApp(msg) {
     return;
   }
   console.log(`📩 ${msg.name || msg.from} (${msg.from}): ${msg.text}`);
+  sendTypingIndicator(msg.id); // "מקליד..." בזמן שנועה חושבת
   const lead = getLead(msg.from, msg.name);
   const history = getHistory(msg.from); // ההיסטוריה לפני התור הנוכחי
   const decision = await handleMessage(lead, history, msg.text);
