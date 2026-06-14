@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: cmtm-bot
+    runtime: node
+    plan: starter
+    region: frankfurt
+    buildCommand: npm install
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: cmtm-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /var/data
+      - key: BOT_MODEL
+        value: claude-sonnet-4-6
+      - key: WHATSAPP_VERIFY_TOKEN
+        value: cmtm-verify-7421
+      - key: WEBHOOK_SECRET
+        value: cmtm-wizup-7421
+      - key: DRIP_ENABLED
+        value: "true"
+      - key: LINK_INTRO_A
+        value: https://vimeo.com/user107664930/review/419964904/82f05cd7f8
+      - key: LINK_INTRO_B
+        value: https://vimeo.com/user107664930/review/419985979/62c6f9fd14
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
