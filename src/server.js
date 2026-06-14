@@ -6,7 +6,7 @@
 import http from "node:http";
 import { config } from "./config.js";
 import { handleMessage } from "./brain.js";
-import { updateLead as fireberryUpdate } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, logConversation } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -17,6 +17,7 @@ import {
   enrollLead,
   allLeads,
   setRuntimeToken,
+  setFireberryToken,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -68,6 +69,15 @@ async function processWhatsApp(msg) {
       `🔥 ליד חם — ${lead.name || msg.from} (${msg.from}) | ציון=${lead.score} | פרסונה=${lead.persona} | סיבה=${decision.handoff_reason || "ציון גבוה"}`
     );
   }
+  // שמירת השיחה ב-Fireberry (אסינכרוני, לא חוסם את המענה ללקוח)
+  (async () => {
+    let accId = l.fireberryId;
+    if (!accId) {
+      accId = await findAccountByPhone(msg.from);
+      if (accId) updateLead(msg.from, { fireberryId: accId });
+    }
+    await logConversation(accId, msg.text, decision.reply, msg.name);
+  })().catch((e) => console.error("[fireberry] log:", e.message));
 }
 
 const server = http.createServer(async (req, res) => {
@@ -125,11 +135,17 @@ const server = http.createServer(async (req, res) => {
     if (body.secret !== config.webhookSecret) {
       return send(res, 401, { error: "unauthorized" });
     }
-    if (!body.token || body.token.length < 30) {
-      return send(res, 400, { error: "טוקן לא תקין" });
+    const updated = [];
+    if (body.token && body.token.length >= 30) {
+      setRuntimeToken(body.token);
+      updated.push("whatsapp");
     }
-    setRuntimeToken(body.token);
-    return send(res, 200, { updated: true });
+    if (body.fireberryToken && body.fireberryToken.length >= 10) {
+      setFireberryToken(body.fireberryToken);
+      updated.push("fireberry");
+    }
+    if (!updated.length) return send(res, 400, { error: "לא סופק טוקן תקין" });
+    return send(res, 200, { updated });
   }
 
   // אימות webhook של Meta
@@ -172,7 +188,7 @@ const server = http.createServer(async (req, res) => {
     }
     const phone = normalizePhone(body.phone);
     if (phone.length < 9) return send(res, 400, { error: "טלפון לא תקין" });
-    const lead = enrollLead(phone, body.name || "");
+    const lead = enrollLead(phone, body.name || "", body.accountId || body.fireberryId || "");
     startSequence(lead).catch((e) => console.error("[lead] startSequence:", e.message));
     return send(res, 200, { enrolled: true, phone, name: lead.name });
   }

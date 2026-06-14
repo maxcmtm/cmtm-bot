@@ -27,6 +27,13 @@ export function setRuntimeToken(t) {
   state.runtime.whatsappToken = t || "";
   save();
 }
+export function getFireberryToken() {
+  return state.runtime?.fireberryToken || "";
+}
+export function setFireberryToken(t) {
+  state.runtime.fireberryToken = t || "";
+  save();
+}
 
 let saveTimer = null;
 function save() {
@@ -62,6 +69,7 @@ export function getLead(phone, name) {
       status: "active_chat", // ליד שכתב מיוזמתו
       seqStep: 0,
       history: [],
+      fireberryId: "",
       lastInboundTs: Date.now(),
       lastDripTs: 0,
       createdTs: Date.now(),
@@ -100,7 +108,7 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();
@@ -113,7 +121,7 @@ export function allLeads() {
 }
 
 // יצירת ליד חדש לרצף החימום (מטופס/CRM) אם לא קיים
-export function enrollLead(phone, name) {
+export function enrollLead(phone, name, fireberryId = "") {
   let l = state.leads[phone];
   if (!l) {
     l = {
@@ -124,11 +132,15 @@ export function enrollLead(phone, name) {
       status: "in_sequence",
       seqStep: -1, // -1 = עוד לא נשלחה הודעת פתיחה
       history: [],
+      fireberryId: fireberryId || "",
       lastInboundTs: 0,
       lastDripTs: 0,
       createdTs: Date.now(),
     };
     state.leads[phone] = l;
+    save();
+  } else if (fireberryId && !l.fireberryId) {
+    l.fireberryId = fireberryId;
     save();
   }
   return l;

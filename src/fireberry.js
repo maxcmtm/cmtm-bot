@@ -1,48 +1,74 @@
-// עדכון כרטיס ליד ב-Fireberry. כברירת מחדל "יבש" (לוג בלבד) עד שמוזן טוקן.
-// כשמוזן FIREBERRY_API_TOKEN — מעדכן את שדות ה-wa_* האמיתיים.
+// אינטגרציה עם Fireberry: שמירת שיחות (אובייקט 1012 "וואטסאפ") + חיפוש תלמיד לפי טלפון.
 import { config } from "./config.js";
+import { getFireberryToken } from "./store.js";
 
-// מיפוי שמות לוגיים → שמות שדה ב-Fireberry (לעדכן לפי השדות שתיצרו בפועל)
-const FIELD_MAP = {
-  wa_status: "wa_status",
-  wa_persona: "wa_persona",
-  wa_score: "wa_score",
-  wa_last_reply: "wa_last_reply",
-  wa_summary: "wa_summary",
-  wa_seq_step: "wa_seq_step",
-  wa_last_sent: "wa_last_sent",
-};
+const BASE = "https://api.fireberry.com";
+function token() {
+  return getFireberryToken() || config.fireberry.token;
+}
 
-/**
- * מעדכן שדות על ליד ב-Fireberry.
- * @param {string} leadId - מזהה הרשומה ב-Fireberry
- * @param {object} fields - שדות לוגיים לעדכון, למשל { wa_score: 45, wa_status: 'hot' }
- */
-export async function updateLead(leadId, fields) {
-  const mapped = {};
-  for (const [k, v] of Object.entries(fields)) {
-    mapped[FIELD_MAP[k] || k] = v;
+// 972546641264 -> 0546641264 (פורמט ישראלי כפי שנשמר ב-Fireberry)
+export function waToIsraeli(phone) {
+  let p = String(phone || "").replace(/\D/g, "");
+  if (p.startsWith("972")) p = "0" + p.slice(3);
+  else if (!p.startsWith("0")) p = "0" + p;
+  return p;
+}
+
+// מציאת מזהה תלמיד (Account) לפי טלפון. מחזיר accountid או null.
+export async function findAccountByPhone(phone) {
+  if (!token()) return null;
+  const local = waToIsraeli(phone);
+  try {
+    const r = await fetch(`${BASE}/api/query`, {
+      method: "POST",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        objecttype: 1,
+        page_size: 1,
+        fields: "accountid,firstname,telephone1",
+        query: `(telephone1 = '${local}')`,
+      }),
+    });
+    if (!r.ok) return null;
+    const d = await r.json();
+    const recs = d?.data?.Data || d?.data?.data || [];
+    return recs[0]?.accountid || null;
+  } catch {
+    return null;
   }
+}
 
-  if (!config.fireberry.token) {
-    console.log(`[fireberry:DRY] עדכון ליד ${leadId}:`, JSON.stringify(mapped));
+// רישום תור שיחה ב-Fireberry (אובייקט 1012): הודעה נכנסת + יוצאת, מקושר לתלמיד.
+export async function logConversation(accountId, incoming, outgoing, name = "") {
+  if (!token()) {
+    console.log(`[fireberry:DRY] שיחה: «${incoming}» → «${(outgoing || "").slice(0, 40)}»`);
     return { dryRun: true };
   }
-
-  // Fireberry Object API — עדכון רשומה (סוג אובייקט "ליד"/Lead).
-  // התאם את ה-path/objectType לפי החשבון שלך (ראו תיעוד Fireberry / api.fireberry.com).
-  const res = await fetch(`${config.fireberry.baseUrl}/api/record/Lead/${leadId}`, {
-    method: "PUT",
-    headers: {
-      tokenid: config.fireberry.token,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(mapped),
-  });
-  if (!res.ok) {
-    const t = await res.text();
-    console.error(`[fireberry] שגיאת עדכון ${res.status}: ${t}`);
-    return { ok: false, status: res.status };
+  const body = {
+    name: name || "שיחת בוט וואטסאפ",
+    pcfsystemfield111: incoming || "", // הודעה נכנסת txt
+    pcfsystemfield112: outgoing || "", // הודעה יוצאת txt
+  };
+  if (accountId) body.pcfsystemfield102 = accountId; // קישור ללקוח/תלמיד
+  try {
+    const r = await fetch(`${BASE}/api/record/1012`, {
+      method: "POST",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      console.error(`[fireberry] רישום שיחה נכשל ${r.status}: ${(await r.text()).slice(0, 150)}`);
+      return { ok: false };
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("[fireberry] שגיאת רישום:", e.message);
+    return { ok: false };
   }
-  return { ok: true };
+}
+
+// שמירת לגאסי לתאימות עם /webhook הישן (לא בשימוש פעיל)
+export async function updateLead() {
+  return { dryRun: true };
 }
