@@ -17,6 +17,16 @@ try {
 }
 if (!state.leads) state.leads = {};
 if (!state.seen) state.seen = [];
+if (!state.runtime) state.runtime = {}; // הגדרות שניתן לעדכן בזמן ריצה (למשל טוקן)
+
+// טוקן וואטסאפ שעודכן בזמן ריצה (גובר על משתנה הסביבה). שורד ריסטארט (על הדיסק).
+export function getRuntimeToken() {
+  return state.runtime?.whatsappToken || "";
+}
+export function setRuntimeToken(t) {
+  state.runtime.whatsappToken = t || "";
+  save();
+}
 
 let saveTimer = null;
 function save() {

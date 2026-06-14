@@ -1,7 +1,13 @@
 // חיבור ישיר ל-Meta WhatsApp Cloud API — אימות webhook, פענוח הודעות, ושליחה.
 import { config } from "./config.js";
+import { getRuntimeToken } from "./store.js";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
+
+// הטוקן הפעיל: עדכון בזמן ריצה גובר על משתנה הסביבה
+export function activeToken() {
+  return getRuntimeToken() || config.whatsapp.token;
+}
 
 // אימות ה-webhook מול Meta (הקריאה הראשונה כשמגדירים את הכתובת)
 export function verifyWebhook(query) {
@@ -38,7 +44,7 @@ export function parseIncoming(body) {
 
 // שליחת תבנית מאושרת (Marketing) ללקוח. params = מערך ערכים ל-{{1}}, {{2}}...
 export async function sendTemplate(to, templateName, params = []) {
-  if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
+  if (!activeToken() || !config.whatsapp.phoneNumberId) {
     console.log(`[whatsapp:DRY] תבנית ${templateName} → ${to} (${params.join(",")})`);
     return { dryRun: true };
   }
@@ -48,7 +54,7 @@ export async function sendTemplate(to, templateName, params = []) {
   const res = await fetch(`${GRAPH}/${config.whatsapp.phoneNumberId}/messages`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${config.whatsapp.token}`,
+      authorization: `Bearer ${activeToken()}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -68,14 +74,14 @@ export async function sendTemplate(to, templateName, params = []) {
 
 // שליחת הודעת טקסט (session) ללקוח דרך Meta. יבש אם אין טוקן.
 export async function sendText(to, text) {
-  if (!config.whatsapp.token || !config.whatsapp.phoneNumberId) {
+  if (!activeToken() || !config.whatsapp.phoneNumberId) {
     console.log(`[whatsapp:DRY] → ${to}: ${text}`);
     return { dryRun: true };
   }
   const res = await fetch(`${GRAPH}/${config.whatsapp.phoneNumberId}/messages`, {
     method: "POST",
     headers: {
-      authorization: `Bearer ${config.whatsapp.token}`,
+      authorization: `Bearer ${activeToken()}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({

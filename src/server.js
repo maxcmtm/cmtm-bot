@@ -7,7 +7,7 @@ import http from "node:http";
 import { config } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { updateLead as fireberryUpdate } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText } from "./whatsapp.js";
+import { verifyWebhook, parseIncoming, sendText, activeToken } from "./whatsapp.js";
 import {
   alreadyProcessed,
   getHistory,
@@ -16,6 +16,7 @@ import {
   updateLead,
   enrollLead,
   allLeads,
+  setRuntimeToken,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -92,7 +93,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const r = await fetch(
         `https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}?fields=display_phone_number`,
-        { headers: { authorization: `Bearer ${config.whatsapp.token}` } }
+        { headers: { authorization: `Bearer ${activeToken()}` } }
       );
       tokenValid = r.ok;
       if (!r.ok) tokenErr = (await r.text()).slice(0, 200);
@@ -110,6 +111,24 @@ const server = http.createServer(async (req, res) => {
       leadCount: leads.length,
       leads,
     });
+  }
+
+  // עדכון טוקן וואטסאפ מרחוק (מוגן בסוד) — מעדכן בלי לגעת ב-Render
+  if (req.method === "POST" && path === "/admin/token") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      return send(res, 400, { error: "invalid json" });
+    }
+    if (body.secret !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    if (!body.token || body.token.length < 30) {
+      return send(res, 400, { error: "טוקן לא תקין" });
+    }
+    setRuntimeToken(body.token);
+    return send(res, 200, { updated: true });
   }
 
   // אימות webhook של Meta
