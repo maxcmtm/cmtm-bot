@@ -15,6 +15,7 @@ import {
   getLead,
   updateLead,
   enrollLead,
+  allLeads,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -79,6 +80,35 @@ const server = http.createServer(async (req, res) => {
       model: config.model,
       mode: config.anthropicKey ? "live" : "mock",
       whatsapp: config.whatsapp.phoneNumberId ? "connected" : "not-configured",
+    });
+  }
+
+  // אבחון (מוגן בסוד): ?secret=...
+  if (req.method === "GET" && path === "/admin") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    let tokenValid = false, tokenErr = "";
+    try {
+      const r = await fetch(
+        `https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}?fields=display_phone_number`,
+        { headers: { authorization: `Bearer ${config.whatsapp.token}` } }
+      );
+      tokenValid = r.ok;
+      if (!r.ok) tokenErr = (await r.text()).slice(0, 200);
+    } catch (e) {
+      tokenErr = e.message;
+    }
+    const leads = allLeads().map((l) => ({
+      phone: l.id, name: l.name, status: l.status, step: l.seqStep, lastInboundTs: l.lastInboundTs,
+    }));
+    return send(res, 200, {
+      tokenValid,
+      tokenErr,
+      phoneNumberId: config.whatsapp.phoneNumberId,
+      dripEnabled: config.drip.enabled,
+      leadCount: leads.length,
+      leads,
     });
   }
 
