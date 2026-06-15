@@ -34,6 +34,14 @@ export function setFireberryToken(t) {
   state.runtime.fireberryToken = t || "";
   save();
 }
+// מתג השהיה זמני — כשפעיל, הבוט לא עונה ולא שולח חימום
+export function isPaused() {
+  return !!state.runtime?.paused;
+}
+export function setPaused(b) {
+  state.runtime.paused = !!b;
+  save();
+}
 
 let saveTimer = null;
 function save() {

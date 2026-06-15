@@ -18,6 +18,8 @@ import {
   allLeads,
   setRuntimeToken,
   setFireberryToken,
+  isPaused,
+  setPaused,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -42,6 +44,10 @@ function statusFromScore(score) {
 // מעבד הודעת וואטסאפ אחת מ-Meta: מריץ את הבוט, שולח תשובה, מעדכן מצב
 async function processWhatsApp(msg) {
   if (alreadyProcessed(msg.id)) return;
+  if (isPaused()) {
+    console.log(`⏸️ הבוט מושהה — מתעלם מהודעה מ-${msg.name || msg.from}`);
+    return;
+  }
   if (msg.type !== "text" || !msg.text) {
     await sendText(msg.from, "היי 🙂 כרגע אני יודעת לקרוא הודעות טקסט — כתוב לי ואשמח לעזור בכל שאלה על הלימודים!");
     return;
@@ -119,9 +125,25 @@ const server = http.createServer(async (req, res) => {
       tokenErr,
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
+      paused: isPaused(),
       leadCount: leads.length,
       leads,
     });
+  }
+
+  // השהיה/הפעלה של הבוט מרחוק (מוגן בסוד)
+  if (req.method === "POST" && path === "/admin/pause") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      return send(res, 400, { error: "invalid json" });
+    }
+    if (body.secret !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    setPaused(!!body.paused);
+    return send(res, 200, { paused: isPaused() });
   }
 
   // עדכון טוקן וואטסאפ מרחוק (מוגן בסוד) — מעדכן בלי לגעת ב-Render

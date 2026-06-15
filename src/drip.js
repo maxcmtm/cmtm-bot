@@ -1,6 +1,6 @@
 // מנוע החימום: שולח את התבנית הבאה ברצף ללידים שלא ענו, כל X ימים.
 import { config } from "./config.js";
-import { allLeads, updateLead, pushAssistantTurn } from "./store.js";
+import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
 import { sendTemplate } from "./whatsapp.js";
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
@@ -63,7 +63,7 @@ export async function startSequence(lead) {
 
 // בדיקה תקופתית: מי בשל לשלב הבא
 export async function runDripCheck() {
-  if (!config.drip.enabled) return 0;
+  if (!config.drip.enabled || isPaused()) return 0;
   const now = Date.now();
   const stepMs = config.drip.stepDays * 24 * 60 * 60 * 1000;
   const quietMs = config.drip.quietHours * 60 * 60 * 1000; // לא לשלוח אם ענה לאחרונה
