@@ -20,6 +20,7 @@ import {
   setFireberryToken,
   isPaused,
   setPaused,
+  deleteLead,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -136,6 +137,22 @@ const server = http.createServer(async (req, res) => {
       leadCount: leads.length,
       leads,
     });
+  }
+
+  // איפוס ליד (לבדיקות) — מוחק כדי שאפשר להתחיל רצף מחדש
+  if (req.method === "POST" && path === "/admin/reset") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      return send(res, 400, { error: "invalid json" });
+    }
+    if (body.secret !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    const phone = normalizePhone(body.phone);
+    const deleted = deleteLead(phone);
+    return send(res, 200, { deleted, phone });
   }
 
   // השהיה/הפעלה של הבוט מרחוק (מוגן בסוד)

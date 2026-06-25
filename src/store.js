@@ -128,6 +128,16 @@ export function allLeads() {
   return Object.values(state.leads);
 }
 
+// מחיקת ליד (לבדיקות / איפוס)
+export function deleteLead(phone) {
+  if (state.leads[phone]) {
+    delete state.leads[phone];
+    save();
+    return true;
+  }
+  return false;
+}
+
 // יצירת ליד חדש לרצף החימום (מטופס/CRM) אם לא קיים
 export function enrollLead(phone, name, fireberryId = "") {
   let l = state.leads[phone];
