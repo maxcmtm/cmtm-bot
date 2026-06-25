@@ -232,9 +232,13 @@ const server = http.createServer(async (req, res) => {
     } catch {
       return send(res, 400, { error: "invalid json" });
     }
-    const phone = normalizePhone(body.phone);
+    // קולט גם מ-body (JSON) וגם מ-query string (telephone/firstname/accountid)
+    const q = url.searchParams;
+    const phone = normalizePhone(body.phone || q.get("phone") || q.get("telephone") || "");
     if (phone.length < 9) return send(res, 400, { error: "טלפון לא תקין" });
-    const lead = enrollLead(phone, body.name || "", body.accountId || body.fireberryId || "");
+    const name = body.name || q.get("name") || q.get("firstname") || "";
+    const accId = body.accountId || body.fireberryId || q.get("accountId") || q.get("accountid") || "";
+    const lead = enrollLead(phone, name, accId);
     startSequence(lead).catch((e) => console.error("[lead] startSequence:", e.message));
     return send(res, 200, { enrolled: true, phone, name: lead.name });
   }
