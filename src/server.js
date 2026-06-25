@@ -23,7 +23,14 @@ import {
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
-const normalizePhone = (p) => String(p || "").replace(/\D/g, "");
+// המרת טלפון לפורמט וואטסאפ בינלאומי: 0546641264 → 972546641264
+const normalizePhone = (p) => {
+  let d = String(p || "").replace(/\D/g, "");
+  if (d.startsWith("972")) return d;
+  if (d.startsWith("0")) return "972" + d.slice(1);
+  if (d.length === 9) return "972" + d; // חסר 0 מוביל
+  return d;
+};
 
 function send(res, code, obj) {
   res.writeHead(code, { "content-type": "application/json; charset=utf-8" });
