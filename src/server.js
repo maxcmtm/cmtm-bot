@@ -4,7 +4,9 @@
 //   POST /whatsapp       — הודעות נכנסות מ-Meta (הבוט עונה ושולח דרך Meta)
 //   POST /webhook        — נקודת קצה גנרית (Make/Wizup/בדיקות) — מחזירה reply ב-JSON
 import http from "node:http";
-import { config } from "./config.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, logConversation } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator } from "./whatsapp.js";
@@ -106,6 +108,42 @@ const server = http.createServer(async (req, res) => {
       model: config.model,
       mode: config.anthropicKey ? "live" : "mock",
       whatsapp: config.whatsapp.phoneNumberId ? "connected" : "not-configured",
+    });
+  }
+
+  // דאשבורד — דף מעקב לידים (HTML)
+  if (req.method === "GET" && path === "/dashboard") {
+    try {
+      const html = readFileSync(join(ROOT, "dashboard.html"), "utf8");
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return res.end(html);
+    } catch {
+      return send(res, 500, { error: "dashboard.html חסר" });
+    }
+  }
+
+  // נתוני דאשבורד (JSON) — מוגן בסוד
+  if (req.method === "GET" && path === "/admin/data") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    const leads = allLeads().map((l) => ({
+      phone: l.id,
+      name: l.name || "",
+      persona: l.persona || "unknown",
+      score: l.score || 0,
+      status: l.status,
+      seqStep: l.seqStep,
+      msgCount: Math.floor((l.history?.length || 0) / 2),
+      createdTs: l.createdTs || 0,
+      lastInboundTs: l.lastInboundTs || 0,
+      lastDripTs: l.lastDripTs || 0,
+    }));
+    return send(res, 200, {
+      now: Date.now(),
+      dripEnabled: config.drip.enabled,
+      paused: isPaused(),
+      leads,
     });
   }
 

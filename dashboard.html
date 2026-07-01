@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>דאשבורד לידים — תרפיית מימדים</title>
+<style>
+  :root{--bg:#f6f7f9;--card:#fff;--line:#e6e8eb;--txt:#1f2a24;--muted:#6b7280;--green:#0F6E56;--amber:#BA7517;--blue:#185FA5;--gray:#6b7280;--red:#A32D2D;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Arial Hebrew",Arial,sans-serif;background:var(--bg);color:var(--txt);padding:20px;font-size:14px}
+  .wrap{max-width:1200px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px}
+  h1{font-size:22px;color:var(--green)}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .btn{background:var(--green);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card .n{font-size:28px;font-weight:700}
+  .card .l{color:var(--muted);font-size:13px;margin-top:2px}
+  .card.hot .n{color:var(--green)} .card.warm .n{color:var(--amber)} .card.chat .n{color:var(--blue)} .card.conv .n{color:var(--green)}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+  .panel h2{font-size:15px;margin-bottom:12px}
+  .bars{display:flex;flex-direction:column;gap:8px}
+  .bar-row{display:flex;align-items:center;gap:10px}
+  .bar-row .lab{width:150px;font-size:13px;color:var(--muted);flex-shrink:0}
+  .bar-track{flex:1;background:#eef0f2;border-radius:6px;height:22px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:6px;display:flex;align-items:center;padding:0 8px;color:#fff;font-size:12px;font-weight:600;min-width:26px}
+  .toolbar{display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+  input[type=search]{flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px}
+  select{padding:9px 12px;border:1px solid var(--line);border-radius:8px;font-size:14px;background:#fff}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line);font-size:13px}
+  th{background:#fafbfc;color:var(--muted);font-weight:600;cursor:pointer;user-select:none;white-space:nowrap}
+  th:hover{color:var(--txt)}
+  tr:last-child td{border-bottom:0}
+  tr:hover td{background:#fafbfc}
+  .pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap}
+  .p-warm{background:#FAEEDA;color:#8a5a10} .p-chat{background:#E6F1FB;color:#0C447C} .p-hot{background:#EAF3DE;color:#27500A} .p-gray{background:#eef0f2;color:#555}
+  .score{font-weight:700}
+  .muted{color:var(--muted)}
+  .err{background:#FCEBEB;color:#A32D2D;padding:12px;border-radius:8px;margin-bottom:12px}
+  @media(max-width:600px){.bar-row .lab{width:100px}th:nth-child(6),td:nth-child(6),th:nth-child(7),td:nth-child(7){display:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>דאשבורד לידים — תרפיית מימדים</h1>
+      <div class="sub" id="updated">טוען…</div>
+    </div>
+    <button class="btn" onclick="load()">רענן ⟳</button>
+  </header>
+  <div id="error"></div>
+  <div class="cards" id="cards"></div>
+  <div class="panel"><h2>שלב בפלואו</h2><div class="bars" id="stages"></div></div>
+  <div class="panel"><h2>פילוח פרסונות</h2><div class="bars" id="personas"></div></div>
+  <div class="toolbar">
+    <input type="search" id="q" placeholder="חיפוש לפי שם או טלפון…" oninput="render()">
+    <select id="filter" onchange="render()">
+      <option value="">כל הסטטוסים</option>
+      <option value="in_sequence">בחימום</option>
+      <option value="active_chat">בשיחה</option>
+      <option value="hot">חם 🔥</option>
+      <option value="cold">סיים רצף</option>
+      <option value="unsubscribed">הוסר</option>
+    </select>
+  </div>
+  <table id="tbl">
+    <thead><tr>
+      <th onclick="sortBy('name')">שם</th>
+      <th onclick="sortBy('phone')">טלפון</th>
+      <th onclick="sortBy('stage')">שלב בפלואו</th>
+      <th onclick="sortBy('persona')">פרסונה</th>
+      <th onclick="sortBy('score')">ציון חום</th>
+      <th onclick="sortBy('msgCount')">הודעות</th>
+      <th onclick="sortBy('createdTs')">נכנס</th>
+      <th onclick="sortBy('lastTs')">פעילות אחרונה</th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<script>
+const KEY = new URLSearchParams(location.search).get("key") || "";
+let DATA = [], NOW = Date.now(), sortKey="lastTs", sortDir=-1;
+
+const STATUS = {
+  in_sequence:{cls:"p-warm", lab:l=>"חימום · הודעה "+(l.seqStep+1)+"/10"},
+  active_chat:{cls:"p-chat", lab:()=>"בשיחה עם הבוט"},
+  hot:{cls:"p-hot", lab:()=>"🔥 ליד חם"},
+  cold:{cls:"p-gray", lab:()=>"סיים רצף"},
+  unsubscribed:{cls:"p-gray", lab:()=>"הוסר"},
+};
+const PERSONA = {career:"הסבה לקריירה", parent:"הורה", therapist:"מטפל/ת", religious:"מגזר דתי", unknown:"לא ידוע"};
+
+function rel(ts){
+  if(!ts) return "—";
+  const s=(NOW-ts)/1000;
+  if(s<60) return "עכשיו";
+  if(s<3600) return "לפני "+Math.floor(s/60)+" דק'";
+  if(s<86400) return "לפני "+Math.floor(s/3600)+" שע'";
+  return "לפני "+Math.floor(s/86400)+" ימים";
+}
+function absDate(ts){ if(!ts) return ""; const d=new Date(ts); return d.toLocaleDateString("he-IL")+" "+d.toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"}); }
+
+async function load(){
+  document.getElementById("error").innerHTML="";
+  try{
+    const r = await fetch("/admin/data?secret="+encodeURIComponent(KEY));
+    if(!r.ok){ throw new Error(r.status===401?"מפתח שגוי — הוסף ?key=... לכתובת":("שגיאה "+r.status)); }
+    const j = await r.json();
+    NOW = j.now; DATA = j.leads;
+    DATA.forEach(l=> l.lastTs = Math.max(l.lastInboundTs||0, l.lastDripTs||0, l.createdTs||0));
+    document.getElementById("updated").textContent = "עודכן "+new Date(NOW).toLocaleTimeString("he-IL")+" · "+DATA.length+" לידים · חימום "+(j.dripEnabled?"פעיל":"כבוי")+(j.paused?" · ⏸️ מושהה":"");
+    stats(); render();
+  }catch(e){ document.getElementById("error").innerHTML='<div class="err">'+e.message+'</div>'; }
+}
+function count(f){ return DATA.filter(f).length; }
+function stats(){
+  const total=DATA.length;
+  const warm=count(l=>l.status==="in_sequence");
+  const chat=count(l=>l.status==="active_chat");
+  const hot=count(l=>l.status==="hot");
+  const cold=count(l=>l.status==="cold");
+  const unsub=count(l=>l.status==="unsubscribed");
+  const engaged=chat+hot; // ענו למשהו
+  const convRate= total? Math.round(hot/total*100):0;
+  const cards=[
+    {n:total,l:"סה״כ לידים",c:""},
+    {n:warm,l:"בחימום",c:"warm"},
+    {n:chat,l:"בשיחה",c:"chat"},
+    {n:hot,l:"חמים 🔥",c:"hot"},
+    {n:convRate+"%",l:"אחוז המרה לחם",c:"conv"},
+    {n:unsub,l:"הוסרו",c:""},
+  ];
+  document.getElementById("cards").innerHTML = cards.map(c=>`<div class="card ${c.c}"><div class="n">${c.n}</div><div class="l">${c.l}</div></div>`).join("");
+  // שלבים
+  const stageDefs=[["in_sequence","בחימום","#EF9F27"],["active_chat","בשיחה","#378ADD"],["hot","חם 🔥","#639922"],["cold","סיים רצף","#9aa1a8"],["unsubscribed","הוסר","#c0c4c9"]];
+  const max=Math.max(1,total);
+  document.getElementById("stages").innerHTML = stageDefs.map(([k,lab,col])=>{
+    const c=count(l=>l.status===k), w=Math.round(c/max*100);
+    return `<div class="bar-row"><div class="lab">${lab}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(w,c?6:0)}%;background:${col}">${c||""}</div></div></div>`;
+  }).join("");
+  // פרסונות
+  const pmax=Math.max(1,total);
+  document.getElementById("personas").innerHTML = Object.keys(PERSONA).map(k=>{
+    const c=count(l=>(l.persona||"unknown")===k), w=Math.round(c/pmax*100);
+    return `<div class="bar-row"><div class="lab">${PERSONA[k]}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(w,c?6:0)}%;background:#534AB7">${c||""}</div></div></div>`;
+  }).join("");
+}
+function sortBy(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
+function render(){
+  const q=document.getElementById("q").value.trim();
+  const f=document.getElementById("filter").value;
+  let rows=DATA.slice();
+  if(f) rows=rows.filter(l=>l.status===f);
+  if(q) rows=rows.filter(l=>(l.name||"").includes(q)||(l.phone||"").includes(q));
+  rows.sort((a,b)=>{
+    let x=a[sortKey], y=b[sortKey];
+    if(sortKey==="stage"){x=a.status;y=b.status;}
+    if(typeof x==="string"){return (x<y?-1:x>y?1:0)*sortDir;}
+    return ((x||0)-(y||0))*sortDir;
+  });
+  document.getElementById("rows").innerHTML = rows.map(l=>{
+    const st=STATUS[l.status]||{cls:"p-gray",lab:()=>l.status};
+    return `<tr>
+      <td>${l.name||'<span class="muted">—</span>'}</td>
+      <td class="muted">${l.phone}</td>
+      <td><span class="pill ${st.cls}">${st.lab(l)}</span></td>
+      <td>${PERSONA[l.persona]||l.persona}</td>
+      <td class="score">${l.score}</td>
+      <td>${l.msgCount||0}</td>
+      <td title="${absDate(l.createdTs)}">${rel(l.createdTs)}</td>
+      <td title="${absDate(l.lastTs)}">${rel(l.lastTs)}</td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">אין לידים תואמים</td></tr>';
+}
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>
