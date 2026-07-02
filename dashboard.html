@@ -13,6 +13,9 @@
   h1{font-size:22px;color:var(--green)}
   .sub{color:var(--muted);font-size:13px;margin-top:2px}
   .btn{background:var(--green);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .tabs{display:flex;gap:6px;background:#eef0f2;border-radius:10px;padding:4px;width:fit-content;margin-bottom:14px}
+  .tab{border:0;background:transparent;padding:8px 16px;border-radius:8px;font-size:14px;cursor:pointer;color:var(--muted);font-weight:600}
+  .tab.on{background:#fff;color:var(--green);box-shadow:0 1px 3px rgba(0,0,0,.08)}
   .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
   .card .n{font-size:28px;font-weight:700}
@@ -52,6 +55,10 @@
     <button class="btn" onclick="load()">רענן ⟳</button>
   </header>
   <div id="error"></div>
+  <div class="tabs">
+    <button class="tab on" id="tab-drip" onclick="setView('drip')">🔥 פלואו חימום</button>
+    <button class="tab" id="tab-all" onclick="setView('all')">כל הפניות</button>
+  </div>
   <div class="cards" id="cards"></div>
   <div class="panel"><h2>שלב בפלואו</h2><div class="bars" id="stages"></div></div>
   <div class="panel"><h2>פילוח פרסונות</h2><div class="bars" id="personas"></div></div>
@@ -83,6 +90,14 @@
 <script>
 let KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("cmtm_key") || "";
 let DATA = [], NOW = Date.now(), sortKey="lastTs", sortDir=-1;
+let VIEW = localStorage.getItem("cmtm_view") || "drip";
+function setView(v){
+  VIEW=v; localStorage.setItem("cmtm_view",v);
+  document.getElementById("tab-drip").classList.toggle("on", v==="drip");
+  document.getElementById("tab-all").classList.toggle("on", v==="all");
+  stats(); render();
+}
+function viewData(){ return VIEW==="drip" ? DATA.filter(l=>l.source==="drip") : DATA; }
 function promptKey(){ const k=prompt("הזן מפתח גישה לדאשבורד:", KEY||"cmtm-wizup-7421"); if(k){ KEY=k.trim(); localStorage.setItem("cmtm_key",KEY); load(); } }
 
 const STATUS = {
@@ -117,22 +132,33 @@ async function load(){
     const j = await r.json();
     NOW = j.now; DATA = j.leads;
     DATA.forEach(l=> l.lastTs = Math.max(l.lastInboundTs||0, l.lastDripTs||0, l.createdTs||0));
-    document.getElementById("updated").textContent = "עודכן "+new Date(NOW).toLocaleTimeString("he-IL")+" · "+DATA.length+" לידים · חימום "+(j.dripEnabled?"פעיל":"כבוי")+(j.paused?" · ⏸️ מושהה":"");
-    stats(); render();
+    const dripCount=DATA.filter(l=>l.source==="drip").length;
+    document.getElementById("updated").textContent = "עודכן "+new Date(NOW).toLocaleTimeString("he-IL")+" · "+dripCount+" בפלואו חימום · "+DATA.length+" פניות סה״כ · חימום "+(j.dripEnabled?"פעיל":"כבוי")+(j.paused?" · ⏸️ מושהה":"");
+    setView(VIEW);
   }catch(e){ document.getElementById("error").innerHTML='<div class="err">'+e.message+'</div>'; }
 }
-function count(f){ return DATA.filter(f).length; }
 function stats(){
-  const total=DATA.length;
+  const D=viewData();
+  const count=(f)=>D.filter(f).length;
+  const total=D.length;
   const warm=count(l=>l.status==="in_sequence");
   const chat=count(l=>l.status==="active_chat");
   const hot=count(l=>l.status==="hot");
   const cold=count(l=>l.status==="cold");
   const unsub=count(l=>l.status==="unsubscribed");
   const engaged=chat+hot; // ענו למשהו
+  const engRate= total? Math.round(engaged/total*100):0;
   const convRate= total? Math.round(hot/total*100):0;
-  const cards=[
-    {n:total,l:"סה״כ לידים",c:""},
+  const cards= VIEW==="drip" ? [
+    {n:total,l:"נכנסו לחימום",c:""},
+    {n:warm,l:"בתהליך חימום",c:"warm"},
+    {n:engaged,l:"ענו (יצאו מהרצף)",c:"chat"},
+    {n:hot,l:"חמים 🔥",c:"hot"},
+    {n:engRate+"%",l:"אחוז תגובה",c:"conv"},
+    {n:convRate+"%",l:"אחוז המרה לחם",c:"conv"},
+    {n:unsub,l:"הוסרו",c:""},
+  ] : [
+    {n:total,l:"סה״כ פניות",c:""},
     {n:warm,l:"בחימום",c:"warm"},
     {n:chat,l:"בשיחה",c:"chat"},
     {n:hot,l:"חמים 🔥",c:"hot"},
@@ -158,7 +184,7 @@ function sortBy(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} r
 function render(){
   const q=document.getElementById("q").value.trim();
   const f=document.getElementById("filter").value;
-  let rows=DATA.slice();
+  let rows=viewData().slice();
   if(f) rows=rows.filter(l=>l.status===f);
   if(q) rows=rows.filter(l=>(l.name||"").includes(q)||(l.phone||"").includes(q));
   rows.sort((a,b)=>{

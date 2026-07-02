@@ -19,6 +19,14 @@ if (!state.leads) state.leads = {};
 if (!state.seen) state.seen = [];
 if (!state.runtime) state.runtime = {}; // הגדרות שניתן לעדכן בזמן ריצה (למשל טוקן)
 
+// מיגרציה חד-פעמית: תיוג מקור ללידים ישנים (לפני הוספת השדה)
+// ליד שנשלחה לו הודעת חימום (lastDripTs) או שממתין ברצף — נכנס דרך הפלואו; אחרת פנייה נכנסת
+for (const l of Object.values(state.leads)) {
+  if (!l.source) {
+    l.source = l.lastDripTs > 0 || l.status === "in_sequence" ? "drip" : "inbound";
+  }
+}
+
 // טוקן וואטסאפ שעודכן בזמן ריצה (גובר על משתנה הסביבה). שורד ריסטארט (על הדיסק).
 export function getRuntimeToken() {
   return state.runtime?.whatsappToken || "";
@@ -78,6 +86,7 @@ export function getLead(phone, name) {
       seqStep: 0,
       history: [],
       fireberryId: "",
+      source: "inbound", // פנה מיוזמתו בוואטסאפ (לא דרך פלואו החימום)
       lastInboundTs: Date.now(),
       lastDripTs: 0,
       createdTs: Date.now(),
@@ -151,14 +160,21 @@ export function enrollLead(phone, name, fireberryId = "") {
       seqStep: -1, // -1 = עוד לא נשלחה הודעת פתיחה
       history: [],
       fireberryId: fireberryId || "",
+      source: "drip", // נכנס דרך פלואו החימום (Fireberry)
+      enrolledTs: Date.now(),
       lastInboundTs: 0,
       lastDripTs: 0,
       createdTs: Date.now(),
     };
     state.leads[phone] = l;
     save();
-  } else if (fireberryId && !l.fireberryId) {
-    l.fireberryId = fireberryId;
+  } else {
+    // ליד קיים שהוכנס לחימום — מתייג כחלק מהפלואו
+    if (fireberryId && !l.fireberryId) l.fireberryId = fireberryId;
+    if (l.source !== "drip") {
+      l.source = "drip";
+      l.enrolledTs = Date.now();
+    }
     save();
   }
   return l;

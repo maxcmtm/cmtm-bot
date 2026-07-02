@@ -134,6 +134,7 @@ const server = http.createServer(async (req, res) => {
       score: l.score || 0,
       status: l.status,
       seqStep: l.seqStep,
+      source: l.source || "inbound",
       msgCount: Math.floor((l.history?.length || 0) / 2),
       createdTs: l.createdTs || 0,
       lastInboundTs: l.lastInboundTs || 0,
