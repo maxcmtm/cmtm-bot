@@ -81,8 +81,9 @@
   </table>
 </div>
 <script>
-const KEY = new URLSearchParams(location.search).get("key") || "";
+let KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("cmtm_key") || "";
 let DATA = [], NOW = Date.now(), sortKey="lastTs", sortDir=-1;
+function promptKey(){ const k=prompt("הזן מפתח גישה לדאשבורד:", KEY||"cmtm-wizup-7421"); if(k){ KEY=k.trim(); localStorage.setItem("cmtm_key",KEY); load(); } }
 
 const STATUS = {
   in_sequence:{cls:"p-warm", lab:l=>"חימום · הודעה "+(l.seqStep+1)+"/10"},
@@ -106,8 +107,13 @@ function absDate(ts){ if(!ts) return ""; const d=new Date(ts); return d.toLocale
 async function load(){
   document.getElementById("error").innerHTML="";
   try{
+    if(!KEY){ document.getElementById("error").innerHTML='<div class="err">נדרש מפתח גישה. <button class="btn" onclick="promptKey()">הזן מפתח</button></div>'; return; }
     const r = await fetch("/admin/data?secret="+encodeURIComponent(KEY));
-    if(!r.ok){ throw new Error(r.status===401?"מפתח שגוי — הוסף ?key=... לכתובת":("שגיאה "+r.status)); }
+    if(!r.ok){
+      if(r.status===401){ document.getElementById("error").innerHTML='<div class="err">מפתח שגוי. <button class="btn" onclick="promptKey()">נסה שוב</button></div>'; return; }
+      throw new Error("שגיאה "+r.status);
+    }
+    localStorage.setItem("cmtm_key", KEY);
     const j = await r.json();
     NOW = j.now; DATA = j.leads;
     DATA.forEach(l=> l.lastTs = Math.max(l.lastInboundTs||0, l.lastDripTs||0, l.createdTs||0));
