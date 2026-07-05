@@ -169,12 +169,9 @@ export function enrollLead(phone, name, fireberryId = "") {
     state.leads[phone] = l;
     save();
   } else {
-    // ליד קיים שהוכנס לחימום — מתייג כחלק מהפלואו
+    // ליד קיים — רק משלימים מזהה Fireberry. לא מתייגים מחדש ולא מאתחלים רצף
+    // (מונע כפילות כשהאוטומציה נורית שוב על "פנייה חוזרת" שהבוט עצמו עדכן)
     if (fireberryId && !l.fireberryId) l.fireberryId = fireberryId;
-    if (l.source !== "drip") {
-      l.source = "drip";
-      l.enrolledTs = Date.now();
-    }
     save();
   }
   return l;

@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, logConversation } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -93,6 +93,8 @@ async function processWhatsApp(msg) {
       if (accId) updateLead(msg.from, { fireberryId: accId });
     }
     await logConversation(accId, msg.text, decision.reply, msg.name);
+    // ליד קיים שכתב: מעדכנים את אותה רשומה (תאריך פנייה + פנייה חוזרת) — לא יוצרים חדשה
+    if (accId) await touchReturningLead(accId);
   })().catch((e) => console.error("[fireberry] log:", e.message));
 }
 

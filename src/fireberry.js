@@ -26,7 +26,7 @@ export async function findAccountByPhone(phone) {
       body: JSON.stringify({
         objecttype: 1,
         page_size: 1,
-        fields: "accountid,firstname,telephone1",
+        fields: "accountid,firstname,telephone1,statuscode",
         query: `(telephone1 = '${local}')`,
       }),
     });
@@ -36,6 +36,52 @@ export async function findAccountByPhone(phone) {
     return recs[0]?.accountid || null;
   } catch {
     return null;
+  }
+}
+
+// סטטוסים "מוגנים" שלא דורסים: בתהליך רישום(18), מעוניין בשיעור התנסות(21),
+// תלמיד פעיל(22), נשר-פעיל לשעבר(27), ERN נכשל(28)
+const PROTECTED_STATUSES = new Set([18, 21, 22, 27, 28]);
+const STATUS_RETURNING = 23; // פנייה חוזרת
+
+// ליד קיים שכתב שוב: מעדכנים את אותה רשומה — תאריך פנייה אחרונה=עכשיו,
+// וסטטוס "פנייה חוזרת" (אלא אם הוא בסטטוס מוגן). לא יוצרים ליד חדש!
+export async function touchReturningLead(accountId) {
+  if (!token() || !accountId) return { skipped: true };
+  try {
+    // שליפת הסטטוס הנוכחי
+    const r = await fetch(`${BASE}/api/record/1/${accountId}`, {
+      headers: { tokenid: token(), accept: "application/json" },
+    });
+    if (!r.ok) return { ok: false };
+    const rec = (await r.json())?.data?.Record || {};
+    const cur = Number(rec.statuscode);
+
+    // תאריך פנייה אחרונה = עכשיו (שעון ישראל, פורמט Fireberry)
+    const now = new Date()
+      .toLocaleString("sv-SE", { timeZone: "Asia/Jerusalem" })
+      .replace(" ", "T");
+    const body = { pcfsystemfield241: now };
+    let statusChanged = false;
+    if (!PROTECTED_STATUSES.has(cur) && cur !== STATUS_RETURNING) {
+      body.statuscode = STATUS_RETURNING;
+      statusChanged = true;
+    }
+
+    const u = await fetch(`${BASE}/api/record/1/${accountId}`, {
+      method: "PUT",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!u.ok) {
+      console.error(`[fireberry] עדכון פנייה חוזרת נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
+      return { ok: false };
+    }
+    if (statusChanged) console.log(`🔁 פנייה חוזרת עודכנה ב-Fireberry (${accountId})`);
+    return { ok: true, statusChanged };
+  } catch (e) {
+    console.error("[fireberry] touchReturningLead:", e.message);
+    return { ok: false };
   }
 }
 
