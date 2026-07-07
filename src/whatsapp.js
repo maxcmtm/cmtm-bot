@@ -35,6 +35,7 @@ export function parseIncoming(body) {
           id: m.id,
           type: m.type,
           text: m.type === "text" ? m.text?.body || "" : "",
+          audioId: m.type === "audio" ? m.audio?.id || "" : "",
         });
       }
     }
@@ -70,6 +71,48 @@ export async function sendTemplate(to, templateName, params = []) {
     return { ok: false, status: res.status };
   }
   return { ok: true };
+}
+
+// הורדת מדיה (הודעה קולית וכו') מ-Meta: קודם מקבלים URL זמני, ואז את הקובץ עצמו
+export async function downloadMedia(mediaId) {
+  try {
+    const meta = await fetch(`${GRAPH}/${mediaId}`, {
+      headers: { authorization: `Bearer ${activeToken()}` },
+    });
+    if (!meta.ok) return null;
+    const { url, mime_type } = await meta.json();
+    const bin = await fetch(url, { headers: { authorization: `Bearer ${activeToken()}` } });
+    if (!bin.ok) return null;
+    return { buffer: Buffer.from(await bin.arrayBuffer()), mime: mime_type || "audio/ogg" };
+  } catch (e) {
+    console.error("[whatsapp] downloadMedia:", e.message);
+    return null;
+  }
+}
+
+// תמלול הודעה קולית בעברית (Groq Whisper). מחזיר null אם אין מפתח או שנכשל.
+export async function transcribeAudio(buffer, mime) {
+  if (!config.groqKey) return null;
+  try {
+    const form = new FormData();
+    form.append("file", new Blob([buffer], { type: mime }), "voice.ogg");
+    form.append("model", "whisper-large-v3");
+    form.append("language", "he");
+    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${config.groqKey}` },
+      body: form,
+    });
+    if (!r.ok) {
+      console.error(`[transcribe] ${r.status}: ${(await r.text()).slice(0, 120)}`);
+      return null;
+    }
+    const text = (await r.json()).text?.trim();
+    return text || null;
+  } catch (e) {
+    console.error("[transcribe]", e.message);
+    return null;
+  }
 }
 
 // חיווי "מקליד..." + סימון ההודעה כנקראה. נמשך עד ~25 שניות או עד שליחת תשובה.

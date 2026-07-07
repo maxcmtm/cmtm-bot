@@ -60,6 +60,10 @@
     <button class="tab" id="tab-all" onclick="setView('all')">כל הפניות</button>
   </div>
   <div class="cards" id="cards"></div>
+  <div class="panel" id="report-panel" style="display:none">
+    <details><summary style="cursor:pointer;font-size:15px;font-weight:600">📋 סקירה שבועית אחרונה <span id="report-date" class="muted" style="font-weight:400;font-size:13px"></span></summary>
+    <div id="report-text" style="white-space:pre-wrap;line-height:1.7;margin-top:10px;font-size:13.5px"></div></details>
+  </div>
   <div class="panel"><h2>שלב בפלואו</h2><div class="bars" id="stages"></div></div>
   <div class="panel"><h2>פילוח פרסונות</h2><div class="bars" id="personas"></div></div>
   <div class="toolbar">
@@ -135,6 +139,11 @@ async function load(){
     const fails=(j.failures||[]).filter(f=>NOW-f.ts<48*3600000);
     if(fails.length){
       document.getElementById("error").innerHTML='<div class="err">⚠️ '+fails.length+' הודעות נתקלו בתקלה ב-48 השעות האחרונות (קיבלו הודעת חירום): '+fails.map(f=>(f.name||f.phone)).join(", ")+'</div>';
+    }
+    if(j.report && j.report.text){
+      document.getElementById("report-panel").style.display="block";
+      document.getElementById("report-date").textContent = "· "+new Date(j.report.ts).toLocaleDateString("he-IL");
+      document.getElementById("report-text").textContent = j.report.text;
     }
     const dripCount=DATA.filter(l=>l.source==="drip").length;
     document.getElementById("updated").textContent = "עודכן "+new Date(NOW).toLocaleTimeString("he-IL")+" · "+dripCount+" בפלואו חימום · "+DATA.length+" פניות סה״כ · חימום "+(j.dripEnabled?"פעיל":"כבוי")+(j.paused?" · ⏸️ מושהה":"");

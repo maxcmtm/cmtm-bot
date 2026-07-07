@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator } from "./whatsapp.js";
+import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
   getHistory,
@@ -25,6 +25,8 @@ import {
   deleteLead,
   logFailure,
   getFailures,
+  saveReport,
+  latestReport,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -60,8 +62,22 @@ async function processWhatsApp(msg) {
     console.log(`⏸️ הבוט מושהה — מתעלם מהודעה מ-${msg.name || msg.from}`);
     return;
   }
+  // הודעה קולית: מורידים ומתמללים, וממשיכים כאילו נכתבה בטקסט
+  if (msg.type === "audio" && msg.audioId) {
+    sendTypingIndicator(msg.id);
+    const media = await downloadMedia(msg.audioId);
+    const transcript = media ? await transcribeAudio(media.buffer, media.mime) : null;
+    if (transcript) {
+      msg.text = transcript;
+      msg.type = "text";
+      console.log(`🎤 תומלל (${msg.from}): ${transcript}`);
+    } else {
+      await sendText(msg.from, "שמעתי שהשארת הודעה קולית 🙂 כרגע נוח לי יותר עם טקסט, אפשר לכתוב לי כאן? ואם נוח לך יותר לדבר, אשמח לתאם שיחה עם יועצת.");
+      return;
+    }
+  }
   if (msg.type !== "text" || !msg.text) {
-    await sendText(msg.from, "היי 🙂 כרגע אני יודעת לקרוא הודעות טקסט — כתוב לי ואשמח לעזור בכל שאלה על הלימודים!");
+    await sendText(msg.from, "היי 🙂 כרגע אני יודעת לקרוא הודעות טקסט, כתבו לי ואשמח לעזור בכל שאלה על הלימודים!");
     return;
   }
   console.log(`📩 ${msg.name || msg.from} (${msg.from}): ${msg.text}`);
@@ -86,6 +102,8 @@ async function processWhatsApp(msg) {
     persona: decision.persona,
     scoreDelta: decision.score_delta,
     lastInboundTs: Date.now(),
+    lastIntent: decision.intent,
+    nudgedTs: 0, // ענה — אפשר יהיה לתזכר שוב אם ייעלם שוב
   });
   let status = "active_chat";
   if (decision.intent === "unsubscribe") status = "unsubscribed";
@@ -164,6 +182,7 @@ const server = http.createServer(async (req, res) => {
       dripEnabled: config.drip.enabled,
       paused: isPaused(),
       failures: getFailures().slice(-20),
+      report: latestReport(),
       leads,
     });
   }
@@ -196,6 +215,22 @@ const server = http.createServer(async (req, res) => {
       leadCount: leads.length,
       leads,
     });
+  }
+
+  // שמירת דוח סקירה שבועית (נכתב ע"י הסוכן המתוזמן)
+  if (req.method === "POST" && path === "/admin/report") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      return send(res, 400, { error: "invalid json" });
+    }
+    if (body.secret !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    if (!body.text || body.text.length < 20) return send(res, 400, { error: "text חסר" });
+    saveReport(String(body.text).slice(0, 8000));
+    return send(res, 200, { saved: true });
   }
 
   // איפוס ליד (לבדיקות) — מוחק כדי שאפשר להתחיל רצף מחדש

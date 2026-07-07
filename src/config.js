@@ -52,6 +52,11 @@ export const config = {
     phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
     verifyToken: process.env.WHATSAPP_VERIFY_TOKEN || "cmtm-verify-7421",
   },
+  groqKey: process.env.GROQ_API_KEY || "", // לתמלול הודעות קוליות (Whisper)
+  nudge: {
+    afterHours: Number(process.env.NUDGE_AFTER_HOURS || 18), // תזכורת לליד שנעלם באמצע שיחה
+    maxHours: Number(process.env.NUDGE_MAX_HOURS || 23), // עד סגירת חלון ה-24 שעות
+  },
   drip: {
     enabled: process.env.DRIP_ENABLED !== "false", // מתג כיבוי לשליחת תבניות חימום
     stepDays: Number(process.env.DRIP_STEP_DAYS || 3), // מרווח בין הודעות חימום

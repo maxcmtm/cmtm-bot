@@ -42,6 +42,17 @@ export function setFireberryToken(t) {
   state.runtime.fireberryToken = t || "";
   save();
 }
+// דוחות סקירה שבועית (נכתבים ע"י סוכן מתוזמן, מוצגים בדאשבורד)
+export function saveReport(text) {
+  if (!state.reports) state.reports = [];
+  state.reports.push({ ts: Date.now(), text });
+  if (state.reports.length > 8) state.reports = state.reports.slice(-8);
+  save();
+}
+export function latestReport() {
+  return (state.reports || [])[state.reports?.length - 1] || null;
+}
+
 // יומן כשלים — הודעות שלא קיבלו מענה מלא (נשמר לתחקור והצגה בדאשבורד)
 export function logFailure(entry) {
   if (!state.failures) state.failures = [];
@@ -136,7 +147,7 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();

@@ -1,7 +1,7 @@
 // מנוע החימום: שולח את התבנית הבאה ברצף ללידים שלא ענו, כל X ימים.
 import { config } from "./config.js";
 import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
-import { sendTemplate } from "./whatsapp.js";
+import { sendTemplate, sendText } from "./whatsapp.js";
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
 const STEP_CONTEXT = [
@@ -81,6 +81,33 @@ export async function runDripCheck() {
   return sent;
 }
 
+// תזכורת עדינה: ליד שניהל שיחה עניינית ונעלם — מקבל הודעת המשך אחת
+// בתוך חלון ה-24 שעות (18-23 שעות אחרי ההודעה האחרונה שלו), פעם אחת בלבד.
+const NUDGE_TEXT =
+  "היי 🙂 שמתי לב שעצרנו באמצע. אם נשארה לך שאלה פתוחה או משהו שהיה שווה להרחיב עליו, אני כאן.";
+
+export async function runNudgeCheck() {
+  if (!config.drip.enabled || isPaused()) return 0;
+  const now = Date.now();
+  let sent = 0;
+  for (const lead of allLeads()) {
+    if (lead.status !== "active_chat") continue; // לא חם (נציג מטפל) ולא ברצף
+    if (lead.nudgedTs) continue; // כבר תוזכר ולא ענה — לא מציקים שוב
+    if (lead.lastIntent !== "question") continue; // רק מי שבאמת ניהל שיחה עניינית
+    if (!lead.lastInboundTs) continue;
+    const hours = (now - lead.lastInboundTs) / 3600000;
+    if (hours < config.nudge.afterHours || hours > config.nudge.maxHours) continue;
+    const res = await sendText(lead.id, NUDGE_TEXT);
+    if (res.ok || res.dryRun) {
+      pushAssistantTurn(lead.id, "[השיחה נעצרה ושלחתי תזכורת עדינה: שאלתי אם נשארה שאלה פתוחה]");
+      updateLead(lead.id, { nudgedTs: now });
+      console.log(`⏰ תזכורת המשך → ${lead.name || lead.id}`);
+      sent++;
+    }
+  }
+  return sent;
+}
+
 let timer = null;
 export function startDripScheduler() {
   if (timer) return;
@@ -89,7 +116,10 @@ export function startDripScheduler() {
     return;
   }
   const everyMs = config.drip.checkMinutes * 60 * 1000;
-  timer = setInterval(() => runDripCheck().catch((e) => console.error("[drip]", e.message)), everyMs);
+  timer = setInterval(() => {
+    runDripCheck().catch((e) => console.error("[drip]", e.message));
+    runNudgeCheck().catch((e) => console.error("[nudge]", e.message));
+  }, everyMs);
   console.log(
     `⏰ מנוע חימום פעיל: בדיקה כל ${config.drip.checkMinutes} דק' · מרווח ${config.drip.stepDays} ימים בין הודעות`
   );
