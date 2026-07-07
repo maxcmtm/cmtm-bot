@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 
 const FILE = join(DATA_DIR, "leads.json");
-const MAX_TURNS = 16;
+const MAX_TURNS = 60; // היסטוריה מלאה לתצוגה בדאשבורד (למודל נשלחות רק האחרונות)
 
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
@@ -154,7 +154,7 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();

@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
+import { summarizeLead } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
@@ -87,7 +88,8 @@ async function processWhatsApp(msg) {
   const history = getHistory(msg.from); // ההיסטוריה לפני התור הנוכחי
   let decision;
   try {
-    decision = await handleMessage(lead, history, msg.text);
+    // למודל נשלחות רק 16 ההודעות האחרונות; ההיסטוריה המלאה נשמרת לתצוגה
+    decision = await handleMessage(lead, history.slice(-16), msg.text);
   } catch (err) {
     // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
@@ -99,13 +101,15 @@ async function processWhatsApp(msg) {
     return;
   }
   // עדכון מצב: ליד שענה משהה את רצף החימום
-  const l = updateLead(msg.from, {
+  const updFields = {
     persona: decision.persona,
     scoreDelta: decision.score_delta,
     lastInboundTs: Date.now(),
     lastIntent: decision.intent,
     nudgedTs: 0, // ענה — אפשר יהיה לתזכר שוב אם ייעלם שוב
-  });
+  };
+  if (decision.lead_summary) updFields.summary = decision.lead_summary;
+  const l = updateLead(msg.from, updFields);
   let status = "active_chat";
   if (decision.intent === "unsubscribe") status = "unsubscribed";
   else if (decision.handoff || l.score >= 70) status = "hot";
@@ -173,6 +177,7 @@ const server = http.createServer(async (req, res) => {
       status: l.status,
       seqStep: l.seqStep,
       source: l.source || "inbound",
+      summary: (l.summary || "").slice(0, 300),
       msgCount: Math.floor((l.history?.length || 0) / 2),
       createdTs: l.createdTs || 0,
       lastInboundTs: l.lastInboundTs || 0,
@@ -216,6 +221,56 @@ const server = http.createServer(async (req, res) => {
       leadCount: leads.length,
       leads,
     });
+  }
+
+  // תיק ליד מלא (כולל כל השיחה) — לדאשבורד
+  if (req.method === "GET" && path === "/admin/lead") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    const phone = normalizePhone(url.searchParams.get("phone"));
+    const l = allLeads().find((x) => x.id === phone);
+    if (!l) return send(res, 404, { error: "ליד לא נמצא" });
+    return send(res, 200, {
+      phone: l.id,
+      name: l.name || "",
+      persona: l.persona || "unknown",
+      score: l.score || 0,
+      status: l.status,
+      seqStep: l.seqStep,
+      source: l.source || "inbound",
+      summary: l.summary || "",
+      lastIntent: l.lastIntent || "",
+      fireberryId: l.fireberryId || "",
+      createdTs: l.createdTs || 0,
+      lastInboundTs: l.lastInboundTs || 0,
+      lastDripTs: l.lastDripTs || 0,
+      history: l.history || [],
+    });
+  }
+
+  // יצירת/רענון סיכום לליד (ללידים ישנים בלי סיכום)
+  if (req.method === "POST" && path === "/admin/summarize") {
+    let body;
+    try {
+      body = JSON.parse((await readBody(req)) || "{}");
+    } catch {
+      return send(res, 400, { error: "invalid json" });
+    }
+    if (body.secret !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    const phone = normalizePhone(body.phone);
+    const l = allLeads().find((x) => x.id === phone);
+    if (!l) return send(res, 404, { error: "ליד לא נמצא" });
+    if (!l.history?.length) return send(res, 400, { error: "אין שיחה לסכם" });
+    try {
+      const summary = await summarizeLead(l.history, l);
+      updateLead(phone, { summary });
+      return send(res, 200, { summary });
+    } catch (e) {
+      return send(res, 500, { error: e.message });
+    }
   }
 
   // שמירת דוח סקירה שבועית (נכתב ע"י הסוכן המתוזמן)

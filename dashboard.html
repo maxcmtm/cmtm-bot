@@ -43,6 +43,24 @@
   .muted{color:var(--muted)}
   .err{background:#FCEBEB;color:#A32D2D;padding:12px;border-radius:8px;margin-bottom:12px}
   @media(max-width:600px){.bar-row .lab{width:100px}th:nth-child(6),td:nth-child(6),th:nth-child(7),td:nth-child(7){display:none}}
+  tbody tr{cursor:pointer}
+  .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-start;justify-content:center;z-index:50;padding:24px 12px;overflow-y:auto}
+  .modal-bg.on{display:flex}
+  .lead-card{background:#fff;border-radius:14px;max-width:640px;width:100%;padding:0;overflow:hidden}
+  .lead-head{padding:16px 18px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .lead-head h3{font-size:17px}
+  .lead-meta{color:var(--muted);font-size:12.5px;margin-top:4px;line-height:1.6}
+  .x{border:0;background:#eef0f2;border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;flex-shrink:0}
+  .insight{background:#F3F9F6;border:1px solid #cfe5db;border-radius:10px;margin:14px 18px;padding:12px 14px;font-size:13.5px;line-height:1.65}
+  .insight b{color:var(--green)}
+  .insight .gen{margin-top:8px}
+  .chat{padding:6px 18px 18px;max-height:52vh;overflow-y:auto;background:#f7f5f0}
+  .chat-title{font-size:13px;color:var(--muted);padding:10px 18px 4px;background:#f7f5f0}
+  .bub{max-width:82%;padding:8px 12px;border-radius:12px;margin:6px 0;font-size:13.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
+  .bub.u{background:#fff;border:1px solid var(--line);margin-left:auto;border-radius:12px 12px 12px 3px}
+  .bub.b{background:#DCF6E8;margin-right:auto;border-radius:12px 12px 3px 12px}
+  .sysnote{text-align:center;color:#98a0a8;font-size:11.5px;margin:8px 0;font-style:italic}
+  .btn2{background:#fff;color:var(--green);border:1px solid var(--green);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12.5px}
 </style>
 </head>
 <body>
@@ -90,6 +108,17 @@
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
+</div>
+<div class="modal-bg" id="modal" onclick="if(event.target===this)closeLead()">
+  <div class="lead-card">
+    <div class="lead-head">
+      <div><h3 id="ld-name"></h3><div class="lead-meta" id="ld-meta"></div></div>
+      <button class="x" onclick="closeLead()">✕</button>
+    </div>
+    <div class="insight" id="ld-insight"></div>
+    <div class="chat-title">💬 תיעוד השיחה המלא</div>
+    <div class="chat" id="ld-chat"></div>
+  </div>
 </div>
 <script>
 let KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("cmtm_key") || "";
@@ -208,7 +237,7 @@ function render(){
   });
   document.getElementById("rows").innerHTML = rows.map(l=>{
     const st=STATUS[l.status]||{cls:"p-gray",lab:()=>l.status};
-    return `<tr>
+    return `<tr onclick="openLead('${l.phone}')" title="${(l.summary||'לחץ לתיק הליד').replace(/"/g,'&quot;')}">
       <td>${l.name||'<span class="muted">—</span>'}</td>
       <td class="muted">${l.phone}</td>
       <td><span class="pill ${st.cls}">${st.lab(l)}</span></td>
@@ -220,7 +249,59 @@ function render(){
     </tr>`;
   }).join("") || '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">אין לידים תואמים</td></tr>';
 }
-load();
+// ===== תיק ליד =====
+let CUR_PHONE = null;
+const esc = (s)=>String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+async function openLead(phone){
+  CUR_PHONE = phone;
+  document.getElementById("modal").classList.add("on");
+  document.getElementById("ld-name").textContent = "טוען...";
+  document.getElementById("ld-meta").textContent = phone;
+  document.getElementById("ld-insight").innerHTML = "";
+  document.getElementById("ld-chat").innerHTML = "";
+  try{
+    const r = await fetch("/admin/lead?secret="+encodeURIComponent(KEY)+"&phone="+encodeURIComponent(phone));
+    if(!r.ok) throw new Error("שגיאה "+r.status);
+    renderLead(await r.json());
+  }catch(e){ document.getElementById("ld-name").textContent = "שגיאה: "+e.message; }
+}
+function closeLead(){ document.getElementById("modal").classList.remove("on"); CUR_PHONE=null; }
+function renderLead(l){
+  const st=STATUS[l.status]||{cls:"p-gray",lab:()=>l.status};
+  document.getElementById("ld-name").textContent = l.name || l.phone;
+  document.getElementById("ld-meta").innerHTML =
+    `${l.phone} · <span class="pill ${st.cls}">${st.lab(l)}</span> · ${PERSONA[l.persona]||l.persona} · ציון חום: <b>${l.score}</b><br>`+
+    `נכנס: ${absDate(l.createdTs)}${l.lastInboundTs?` · הודעה אחרונה ממנו: ${absDate(l.lastInboundTs)}`:""}`;
+  document.getElementById("ld-insight").innerHTML =
+    `<b>🧠 מה נועה הבינה:</b><br>`+
+    (l.summary ? esc(l.summary) : `<span class="muted">עדיין אין סיכום לליד הזה.</span>`)+
+    `<div class="gen"><button class="btn2" onclick="genSummary()">${l.summary?"🔄 רענן סיכום":"✨ צור סיכום מהשיחה"}</button></div>`;
+  const chat = document.getElementById("ld-chat");
+  if(!l.history || !l.history.length){
+    chat.innerHTML = '<div class="sysnote">אין עדיין שיחה עם הליד הזה</div>';
+  } else {
+    chat.innerHTML = l.history.map(t=>{
+      const txt = t.content || "";
+      if(t.role==="assistant" && txt.startsWith("[") && txt.endsWith("]"))
+        return `<div class="sysnote">${esc(txt.slice(1,-1))}</div>`;
+      return `<div class="bub ${t.role==="user"?"u":"b"}">${esc(txt)}</div>`;
+    }).join("");
+    chat.scrollTop = chat.scrollHeight;
+  }
+}
+async function genSummary(){
+  if(!CUR_PHONE) return;
+  const box = document.getElementById("ld-insight");
+  box.innerHTML = "<b>🧠 מה נועה הבינה:</b><br>מנתחת את השיחה...";
+  try{
+    const r = await fetch("/admin/summarize",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({secret:KEY,phone:CUR_PHONE})});
+    const j = await r.json();
+    if(!r.ok) throw new Error(j.error||("שגיאה "+r.status));
+    openLead(CUR_PHONE);
+  }catch(e){ box.innerHTML = "<b>🧠 מה נועה הבינה:</b><br>לא הצלחתי לסכם: "+esc(e.message); }
+}
+load().then(()=>{ const p=new URLSearchParams(location.search).get("lead"); if(p) openLead(p); });
 setInterval(load, 30000);
 </script>
 </body>

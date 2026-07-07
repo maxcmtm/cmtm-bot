@@ -43,10 +43,44 @@ export const RESPOND_TOOL = {
         type: "string",
         description: "סיבת ההעברה לנציג (ריק אם handoff=false).",
       },
+      lead_summary: {
+        type: "string",
+        description:
+          "סיכום מעודכן של הליד ב-2-3 משפטים בעברית: מי האדם, מה הביא אותו לפנות, מה הוא באמת מחפש, איפה השיחה עומדת, והתנגדויות/חששות אם עלו. כתוב לנציג מכירות שיקרא את זה לפני שיחה.",
+      },
     },
-    required: ["reply", "persona", "intent", "score_delta", "handoff"],
+    required: ["reply", "persona", "intent", "score_delta", "handoff", "lead_summary"],
   },
 };
+
+// סיכום ליד לפי היסטוריה קיימת (ללידים ישנים שאין להם סיכום) — מודל זול
+export async function summarizeLead(history, lead) {
+  if (!config.anthropicKey) throw new Error("אין מפתח API");
+  const convo = history
+    .map((t) => (t.role === "user" ? "הלקוח: " : "נועה: ") + t.content)
+    .join("\n");
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": config.anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 300,
+      messages: [
+        {
+          role: "user",
+          content: `לפניך שיחת וואטסאפ בין ליד לבין נועה, העוזרת של מכללת תרפיית מימדים (לימודי שיטת טיפול). סכם ב-2-3 משפטים בעברית עבור נציג מכירות: מי האדם, מה הביא אותו לפנות, מה הוא באמת מחפש, איפה השיחה עומדת והתנגדויות אם יש. בלי הקדמות, בלי כותרת ובלי הדגשות (**), ישר הסיכום.\n\nשם הליד: ${lead.name || "לא ידוע"}\n\n${convo}`,
+        },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`summarize ${res.status}`);
+  const data = await res.json();
+  return (data.content?.[0]?.text || "").replace(/\*\*/g, "").replace(/^סיכום[^:]*:\s*/, "").trim();
+}
 
 /**
  * שולח שיחה ל-Claude ומחזיר אובייקט מובנה.
