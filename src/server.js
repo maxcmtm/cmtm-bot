@@ -20,6 +20,7 @@ import {
   allLeads,
   setRuntimeToken,
   setFireberryToken,
+  setGroqToken,
   isPaused,
   setPaused,
   deleteLead,
@@ -283,6 +284,10 @@ const server = http.createServer(async (req, res) => {
     if (body.fireberryToken && body.fireberryToken.length >= 10) {
       setFireberryToken(body.fireberryToken);
       updated.push("fireberry");
+    }
+    if (body.groqToken && body.groqToken.length >= 10) {
+      setGroqToken(body.groqToken);
+      updated.push("groq");
     }
     if (!updated.length) return send(res, 400, { error: "לא סופק טוקן תקין" });
     return send(res, 200, { updated });

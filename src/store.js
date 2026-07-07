@@ -42,6 +42,13 @@ export function setFireberryToken(t) {
   state.runtime.fireberryToken = t || "";
   save();
 }
+export function getGroqToken() {
+  return state.runtime?.groqToken || "";
+}
+export function setGroqToken(t) {
+  state.runtime.groqToken = t || "";
+  save();
+}
 // דוחות סקירה שבועית (נכתבים ע"י סוכן מתוזמן, מוצגים בדאשבורד)
 export function saveReport(text) {
   if (!state.reports) state.reports = [];

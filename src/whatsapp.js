@@ -1,6 +1,6 @@
 // חיבור ישיר ל-Meta WhatsApp Cloud API — אימות webhook, פענוח הודעות, ושליחה.
 import { config } from "./config.js";
-import { getRuntimeToken } from "./store.js";
+import { getRuntimeToken, getGroqToken } from "./store.js";
 
 const GRAPH = "https://graph.facebook.com/v21.0";
 
@@ -92,7 +92,8 @@ export async function downloadMedia(mediaId) {
 
 // תמלול הודעה קולית בעברית (Groq Whisper). מחזיר null אם אין מפתח או שנכשל.
 export async function transcribeAudio(buffer, mime) {
-  if (!config.groqKey) return null;
+  const gk = getGroqToken() || config.groqKey;
+  if (!gk) return null;
   try {
     const form = new FormData();
     form.append("file", new Blob([buffer], { type: mime }), "voice.ogg");
@@ -100,7 +101,7 @@ export async function transcribeAudio(buffer, mime) {
     form.append("language", "he");
     const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
       method: "POST",
-      headers: { authorization: `Bearer ${config.groqKey}` },
+      headers: { authorization: `Bearer ${gk}` },
       body: form,
     });
     if (!r.ok) {
