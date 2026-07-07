@@ -107,8 +107,11 @@ async function processWhatsApp(msg) {
       if (accId) updateLead(msg.from, { fireberryId: accId });
     }
     await logConversation(accId, msg.text, decision.reply, msg.name);
-    // ליד קיים שכתב: מעדכנים את אותה רשומה (תאריך פנייה + פנייה חוזרת) — לא יוצרים חדשה
-    if (accId) await touchReturningLead(accId);
+    // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו
+    // (ביקש נציג / סימן קנייה / הועבר), לא על כל תגובה סתמית
+    const wantsContact =
+      decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
+    if (accId && wantsContact) await touchReturningLead(accId);
   })().catch((e) => console.error("[fireberry] log:", e.message));
 }
 
