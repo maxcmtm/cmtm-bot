@@ -90,16 +90,20 @@ export async function downloadMedia(mediaId) {
   }
 }
 
-// תמלול הודעה קולית בעברית (Groq Whisper). מחזיר null אם אין מפתח או שנכשל.
+// תמלול הודעה קולית בעברית (Whisper). תומך גם ב-OpenAI (מפתח sk-...) וגם ב-Groq (gsk_...).
 export async function transcribeAudio(buffer, mime) {
   const gk = getGroqToken() || config.groqKey;
   if (!gk) return null;
+  const isOpenAI = gk.startsWith("sk-");
+  const endpoint = isOpenAI
+    ? "https://api.openai.com/v1/audio/transcriptions"
+    : "https://api.groq.com/openai/v1/audio/transcriptions";
   try {
     const form = new FormData();
     form.append("file", new Blob([buffer], { type: mime }), "voice.ogg");
-    form.append("model", "whisper-large-v3");
+    form.append("model", isOpenAI ? "whisper-1" : "whisper-large-v3");
     form.append("language", "he");
-    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    const r = await fetch(endpoint, {
       method: "POST",
       headers: { authorization: `Bearer ${gk}` },
       body: form,
