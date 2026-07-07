@@ -132,6 +132,10 @@ async function load(){
     const j = await r.json();
     NOW = j.now; DATA = j.leads;
     DATA.forEach(l=> l.lastTs = Math.max(l.lastInboundTs||0, l.lastDripTs||0, l.createdTs||0));
+    const fails=(j.failures||[]).filter(f=>NOW-f.ts<48*3600000);
+    if(fails.length){
+      document.getElementById("error").innerHTML='<div class="err">⚠️ '+fails.length+' הודעות נתקלו בתקלה ב-48 השעות האחרונות (קיבלו הודעת חירום): '+fails.map(f=>(f.name||f.phone)).join(", ")+'</div>';
+    }
     const dripCount=DATA.filter(l=>l.source==="drip").length;
     document.getElementById("updated").textContent = "עודכן "+new Date(NOW).toLocaleTimeString("he-IL")+" · "+dripCount+" בפלואו חימום · "+DATA.length+" פניות סה״כ · חימום "+(j.dripEnabled?"פעיל":"כבוי")+(j.paused?" · ⏸️ מושהה":"");
     setView(VIEW);

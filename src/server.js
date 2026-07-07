@@ -23,6 +23,8 @@ import {
   isPaused,
   setPaused,
   deleteLead,
+  logFailure,
+  getFailures,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -66,7 +68,19 @@ async function processWhatsApp(msg) {
   sendTypingIndicator(msg.id); // "מקליד..." בזמן שנועה חושבת
   const lead = getLead(msg.from, msg.name);
   const history = getHistory(msg.from); // ההיסטוריה לפני התור הנוכחי
-  const decision = await handleMessage(lead, history, msg.text);
+  let decision;
+  try {
+    decision = await handleMessage(lead, history, msg.text);
+  } catch (err) {
+    // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
+    console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
+    logFailure({ phone: msg.from, name: msg.name, text: msg.text, error: err.message });
+    await sendText(
+      msg.from,
+      "היי 🙂 קיבלתי את ההודעה שלך ומשהו קטן השתבש לי בדרך. אשמח אם תוכל/י לכתוב שוב, או שפשוט אעביר אותך ליועצת שלנו שתחזור אליך. מה נוח לך?"
+    );
+    return;
+  }
   // עדכון מצב: ליד שענה משהה את רצף החימום
   const l = updateLead(msg.from, {
     persona: decision.persona,
@@ -146,6 +160,7 @@ const server = http.createServer(async (req, res) => {
       now: Date.now(),
       dripEnabled: config.drip.enabled,
       paused: isPaused(),
+      failures: getFailures().slice(-20),
       leads,
     });
   }

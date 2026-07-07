@@ -67,20 +67,31 @@ export async function askClaude(messages) {
     messages,
   };
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": config.anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Claude API ${res.status}: ${errText}`);
+  // עד 3 ניסיונות עם המתנה — כדי שתקלה רגעית (עומס/רשת) לא תשאיר ליד בלי מענה
+  let res, lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": config.anthropicKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) break;
+      const errText = await res.text();
+      lastErr = new Error(`Claude API ${res.status}: ${errText.slice(0, 200)}`);
+      // שגיאות זמניות בלבד שוות ניסיון חוזר
+      if (![429, 500, 502, 503, 504, 529].includes(res.status)) throw lastErr;
+    } catch (e) {
+      lastErr = e;
+      res = null;
+    }
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
   }
+  if (!res || !res.ok) throw lastErr || new Error("Claude API failed");
 
   const data = await res.json();
   const toolUse = (data.content || []).find((b) => b.type === "tool_use");

@@ -42,6 +42,17 @@ export function setFireberryToken(t) {
   state.runtime.fireberryToken = t || "";
   save();
 }
+// יומן כשלים — הודעות שלא קיבלו מענה מלא (נשמר לתחקור והצגה בדאשבורד)
+export function logFailure(entry) {
+  if (!state.failures) state.failures = [];
+  state.failures.push({ ...entry, ts: Date.now() });
+  if (state.failures.length > 100) state.failures = state.failures.slice(-50);
+  save();
+}
+export function getFailures() {
+  return state.failures || [];
+}
+
 // מתג השהיה זמני — כשפעיל, הבוט לא עונה ולא שולח חימום
 export function isPaused() {
   return !!state.runtime?.paused;
