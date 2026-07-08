@@ -27,6 +27,7 @@ import {
   deleteLead,
   logFailure,
   getFailures,
+  clearFailures,
   saveReport,
   latestReport,
 } from "./store.js";
@@ -271,6 +272,29 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return send(res, 500, { error: e.message });
     }
+  }
+
+  // עדכון סטטוס ליד ידני (תחזוקה)
+  if (req.method === "POST" && path === "/admin/set-status") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const phone = normalizePhone(body.phone);
+    const ok = ["in_sequence","active_chat","hot","cold","unsubscribed"].includes(body.status);
+    if (!ok) return send(res, 400, { error: "סטטוס לא חוקי" });
+    const l = allLeads().find((x) => x.id === phone);
+    if (!l) return send(res, 404, { error: "ליד לא נמצא" });
+    updateLead(phone, { status: body.status });
+    return send(res, 200, { phone, status: body.status });
+  }
+
+  // ניקוי יומן הכשלים (אחרי טיפול)
+  if (req.method === "POST" && path === "/admin/failures/clear") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    clearFailures();
+    return send(res, 200, { cleared: true });
   }
 
   // שמירת דוח סקירה שבועית (נכתב ע"י הסוכן המתוזמן)

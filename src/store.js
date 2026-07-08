@@ -70,6 +70,10 @@ export function logFailure(entry) {
 export function getFailures() {
   return state.failures || [];
 }
+export function clearFailures() {
+  state.failures = [];
+  save();
+}
 
 // מתג השהיה זמני — כשפעיל, הבוט לא עונה ולא שולח חימום
 export function isPaused() {
