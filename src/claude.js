@@ -95,7 +95,8 @@ export async function askClaude(messages) {
   const body = {
     model: config.model,
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    // caching על הפרומפט הגדול (הוראות + בסיס ידע) — חוסך ~90% מעלות הקלט בקריאות חוזרות
+    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     tools: [RESPOND_TOOL],
     tool_choice: { type: "tool", name: "respond_to_lead" },
     messages,
