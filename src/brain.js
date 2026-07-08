@@ -6,9 +6,10 @@ const UNSUB_WORDS = ["הסר", "הסרה", "להסיר", "תסירו", "stop", "
 const HUMAN_WORDS = ["נציג", "יועצת", "לדבר עם בנאדם", "אדם אמיתי", "טלפון איתי"];
 
 // זיהוי בקשת הסרה — חייב לעבוד גם אם המודל מפספס
+// תופס גם "הסר..", "הסר בבקשה", "הסרה!" וכו'
 function isUnsubscribe(text) {
   const t = (text || "").trim().toLowerCase();
-  return UNSUB_WORDS.some((w) => t === w || t.startsWith(w + " ") || t === w + ".");
+  return UNSUB_WORDS.some((w) => t === w || t.startsWith(w));
 }
 
 // רשת ביטחון: לתפוס אם המודל בטעות נקב במחיר שנה א' (₪ ליד מספר 3-5 ספרות)
