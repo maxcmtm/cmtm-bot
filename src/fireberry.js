@@ -114,6 +114,50 @@ export async function logConversation(accountId, incoming, outgoing, name = "") 
   }
 }
 
+// ===== "הוסר מרשימת דיוור" (pcfsystemfield274) — ציות דיוור =====
+
+// בדיקה לפי טלפון: האם הליד מסומן ב-CRM כמי שאסור לשווק אליו
+export async function isOptedOutByPhone(phone) {
+  if (!token()) return { accountId: null, optedOut: false };
+  const local = waToIsraeli(phone);
+  try {
+    const r = await fetch(`${BASE}/api/query`, {
+      method: "POST",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        objecttype: 1,
+        page_size: 1,
+        fields: "accountid,pcfsystemfield274",
+        query: `(telephone1 = '${local}')`,
+      }),
+    });
+    if (!r.ok) return { accountId: null, optedOut: false };
+    const recs = (await r.json())?.data?.Data || [];
+    if (!recs.length) return { accountId: null, optedOut: false };
+    const v = recs[0].pcfsystemfield274;
+    return { accountId: recs[0].accountid, optedOut: v === "1" || v === 1 || v === "כן" };
+  } catch {
+    return { accountId: null, optedOut: false };
+  }
+}
+
+// סימון "הוסר מרשימת דיוור = כן" ב-CRM (כשמישהו מבקש הסרה בבוט)
+export async function markOptedOut(accountId) {
+  if (!token() || !accountId) return { skipped: true };
+  try {
+    const r = await fetch(`${BASE}/api/record/1/${accountId}`, {
+      method: "PUT",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ pcfsystemfield274: "1" }),
+    });
+    if (r.ok) console.log(`🚫 סומן "הוסר מרשימת דיוור" ב-Fireberry (${accountId})`);
+    return { ok: r.ok };
+  } catch (e) {
+    console.error("[fireberry] markOptedOut:", e.message);
+    return { ok: false };
+  }
+}
+
 // שמירת לגאסי לתאימות עם /webhook הישן (לא בשימוש פעיל)
 export async function updateLead() {
   return { dryRun: true };

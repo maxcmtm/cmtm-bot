@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead, isOptedOutByPhone, markOptedOut } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -136,6 +136,8 @@ async function processWhatsApp(msg) {
     const wantsContact =
       decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
     if (accId && wantsContact) await touchReturningLead(accId);
+    // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
+    if (accId && decision.intent === "unsubscribe") await markOptedOut(accId);
   })().catch((e) => console.error("[fireberry] log:", e.message));
 }
 
@@ -417,6 +419,16 @@ const server = http.createServer(async (req, res) => {
     const name = body.name || q.get("name") || q.get("firstname") || "";
     const accId = body.accountId || body.fireberryId || q.get("accountId") || q.get("accountid") || "";
     const lead = enrollLead(phone, name, accId);
+    if (lead.status === "unsubscribed") {
+      return send(res, 200, { enrolled: false, phone, reason: "הליד ביקש הסרה בעבר" });
+    }
+    // ציות דיוור: אם ב-CRM מסומן "הוסר מרשימת דיוור" — לא משווקים אליו
+    const opt = await isOptedOutByPhone(phone);
+    if (opt.optedOut) {
+      updateLead(phone, { status: "unsubscribed", fireberryId: opt.accountId || lead.fireberryId });
+      console.log(`🚫 ${name || phone} מסומן "הוסר מרשימת דיוור" ב-CRM — לא נכנס לרצף`);
+      return send(res, 200, { enrolled: false, phone, reason: "הוסר מרשימת דיוור ב-CRM" });
+    }
     startSequence(lead).catch((e) => console.error("[lead] startSequence:", e.message));
     return send(res, 200, { enrolled: true, phone, name: lead.name });
   }

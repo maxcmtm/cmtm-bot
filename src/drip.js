@@ -58,6 +58,7 @@ export async function startSequence(lead) {
     return;
   }
   if (lead.seqStep >= 0) return; // כבר התחיל
+  if (lead.status === "unsubscribed") return; // ביקש שלא נפנה אליו
   await sendStep(lead, 0);
 }
 
