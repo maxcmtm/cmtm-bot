@@ -91,6 +91,7 @@
       <option value="in_sequence">בחימום</option>
       <option value="active_chat">בשיחה</option>
       <option value="hot">חם 🔥</option>
+      <option value="engaged">ענו (בשיחה + חם)</option>
       <option value="cold">סיים רצף</option>
       <option value="unsubscribed">הוסר</option>
     </select>
@@ -192,22 +193,27 @@ function stats(){
   const engRate= total? Math.round(engaged/total*100):0;
   const convRate= total? Math.round(hot/total*100):0;
   const cards= VIEW==="drip" ? [
-    {n:total,l:"נכנסו לחימום",c:""},
-    {n:warm,l:"בתהליך חימום",c:"warm"},
-    {n:engaged,l:"ענו (יצאו מהרצף)",c:"chat"},
-    {n:hot,l:"חמים 🔥",c:"hot"},
+    {n:total,l:"נכנסו לחימום",c:"",f:""},
+    {n:warm,l:"בתהליך חימום",c:"warm",f:"in_sequence"},
+    {n:engaged,l:"ענו (יצאו מהרצף)",c:"chat",f:"engaged"},
+    {n:hot,l:"חמים 🔥",c:"hot",f:"hot"},
     {n:engRate+"%",l:"אחוז תגובה",c:"conv"},
     {n:convRate+"%",l:"אחוז המרה לחם",c:"conv"},
-    {n:unsub,l:"הוסרו",c:""},
+    {n:unsub,l:"הוסרו",c:"",f:"unsubscribed"},
   ] : [
-    {n:total,l:"סה״כ פניות",c:""},
-    {n:warm,l:"בחימום",c:"warm"},
-    {n:chat,l:"בשיחה",c:"chat"},
-    {n:hot,l:"חמים 🔥",c:"hot"},
+    {n:total,l:"סה״כ פניות",c:"",f:""},
+    {n:warm,l:"בחימום",c:"warm",f:"in_sequence"},
+    {n:chat,l:"בשיחה",c:"chat",f:"active_chat"},
+    {n:hot,l:"חמים 🔥",c:"hot",f:"hot"},
     {n:convRate+"%",l:"אחוז המרה לחם",c:"conv"},
-    {n:unsub,l:"הוסרו",c:""},
+    {n:unsub,l:"הוסרו",c:"",f:"unsubscribed"},
   ];
-  document.getElementById("cards").innerHTML = cards.map(c=>`<div class="card ${c.c}"><div class="n">${c.n}</div><div class="l">${c.l}</div></div>`).join("");
+  const curF=document.getElementById("filter").value;
+  document.getElementById("cards").innerHTML = cards.map(c=>{
+    const clickable = c.f!==undefined;
+    const active = clickable && curF===c.f && c.f!=="";
+    return `<div class="card ${c.c}" ${clickable?`onclick="filterStatus('${c.f}')" style="cursor:pointer${active?';outline:2px solid var(--green)':''}" title="לחץ לסינון"`:""}><div class="n">${c.n}</div><div class="l">${c.l}</div></div>`;
+  }).join("");
   // שלבים
   const stageDefs=[["in_sequence","בחימום","#EF9F27"],["active_chat","בשיחה","#378ADD"],["hot","חם 🔥","#639922"],["cold","סיים רצף","#9aa1a8"],["unsubscribed","הוסר","#c0c4c9"]];
   const max=Math.max(1,total);
@@ -222,12 +228,18 @@ function stats(){
     return `<div class="bar-row"><div class="lab">${PERSONA[k]}</div><div class="bar-track"><div class="bar-fill" style="width:${Math.max(w,c?6:0)}%;background:#534AB7">${c||""}</div></div></div>`;
   }).join("");
 }
+function filterStatus(v){
+  document.getElementById("filter").value=v;
+  stats(); render();
+  document.getElementById("tbl").scrollIntoView({behavior:"smooth",block:"start"});
+}
 function sortBy(k){ if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=-1;} render(); }
 function render(){
   const q=document.getElementById("q").value.trim();
   const f=document.getElementById("filter").value;
   let rows=viewData().slice();
-  if(f) rows=rows.filter(l=>l.status===f);
+  if(f==="engaged") rows=rows.filter(l=>l.status==="active_chat"||l.status==="hot");
+  else if(f) rows=rows.filter(l=>l.status===f);
   if(q) rows=rows.filter(l=>(l.name||"").includes(q)||(l.phone||"").includes(q));
   rows.sort((a,b)=>{
     let x=a[sortKey], y=b[sortKey];
