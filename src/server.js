@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead, isOptedOutByPhone, markOptedOut } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -125,17 +125,22 @@ async function processWhatsApp(msg) {
   }
   // שמירת השיחה ב-Fireberry (אסינכרוני, לא חוסם את המענה ללקוח)
   (async () => {
+    const wantsContact =
+      decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
     let accId = l.fireberryId;
+    let created = false;
     if (!accId) {
       accId = await findAccountByPhone(msg.from);
+      // ליד וואטסאפ ישיר בלי כרטיס שנהיה רלוונטי — פותחים לו כרטיס (נכנס לתור הנציגים)
+      if (!accId && (wantsContact || l.status === "hot")) {
+        accId = await createAccount(msg.name, msg.from);
+        created = true;
+      }
       if (accId) updateLead(msg.from, { fireberryId: accId });
     }
     await logConversation(accId, msg.text, decision.reply, msg.name);
-    // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו
-    // (ביקש נציג / סימן קנייה / הועבר), לא על כל תגובה סתמית
-    const wantsContact =
-      decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
-    if (accId && wantsContact) await touchReturningLead(accId);
+    // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו (כרטיס חדש כבר נולד בסטטוס הזה)
+    if (accId && wantsContact && !created) await touchReturningLead(accId);
     // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
     if (accId && decision.intent === "unsubscribe") await markOptedOut(accId);
   })().catch((e) => console.error("[fireberry] log:", e.message));

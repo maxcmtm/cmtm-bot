@@ -114,6 +114,32 @@ export async function logConversation(accountId, incoming, outgoing, name = "") 
   }
 }
 
+// יצירת כרטיס תלמיד חדש ב-CRM (לליד וואטסאפ ישיר שנהיה חם ואין לו כרטיס)
+export async function createAccount(name, phone) {
+  if (!token()) return null;
+  try {
+    const r = await fetch(`${BASE}/api/record/1`, {
+      method: "POST",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        accountname: name || waToIsraeli(phone),
+        telephone1: waToIsraeli(phone),
+        statuscode: 23, // פנייה חוזרת — נכנס ישר לתור הנציגים
+      }),
+    });
+    if (!r.ok) {
+      console.error(`[fireberry] יצירת כרטיס נכשלה ${r.status}: ${(await r.text()).slice(0, 120)}`);
+      return null;
+    }
+    const id = (await r.json())?.data?.Record?.accountid || null;
+    if (id) console.log(`🆕 נפתח כרטיס ב-Fireberry לליד וואטסאפ ישיר: ${name || phone}`);
+    return id;
+  } catch (e) {
+    console.error("[fireberry] createAccount:", e.message);
+    return null;
+  }
+}
+
 // ===== "הוסר מרשימת דיוור" (pcfsystemfield274) — ציות דיוור =====
 
 // בדיקה לפי טלפון: האם הליד מסומן ב-CRM כמי שאסור לשווק אליו
