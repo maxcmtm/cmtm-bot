@@ -158,7 +158,7 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();

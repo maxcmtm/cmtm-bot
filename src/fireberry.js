@@ -114,6 +114,36 @@ export async function logConversation(accountId, incoming, outgoing, name = "") 
   }
 }
 
+// סיכום שיחת הבוט ב-CRM: רשומת "וואטסאפ" אחת פר-ליד שמתעדכנת (במקום רשומה לכל הודעה)
+export async function upsertBotSummary(accountId, summaryText, existingRecordId) {
+  if (!token() || !accountId || !summaryText) return existingRecordId || null;
+  try {
+    if (existingRecordId) {
+      const u = await fetch(`${BASE}/api/record/1012/${existingRecordId}`, {
+        method: "PUT",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ pcfsystemfield112: summaryText }),
+      });
+      if (u.ok) return existingRecordId;
+      // אם הרשומה נמחקה — ניצור חדשה
+    }
+    const c = await fetch(`${BASE}/api/record/1012`, {
+      method: "POST",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({
+        name: "🤖 סיכום שיחת וואטסאפ (בוט, מתעדכן)",
+        pcfsystemfield102: accountId,
+        pcfsystemfield112: summaryText,
+      }),
+    });
+    if (!c.ok) return null;
+    return (await c.json())?.data?.Record?.customobject1012id || null;
+  } catch (e) {
+    console.error("[fireberry] upsertBotSummary:", e.message);
+    return existingRecordId || null;
+  }
+}
+
 // יצירת כרטיס תלמיד חדש ב-CRM (לליד וואטסאפ ישיר שנהיה חם ואין לו כרטיס)
 export async function createAccount(name, phone) {
   if (!token()) return null;

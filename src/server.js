@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, logConversation, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -138,7 +138,11 @@ async function processWhatsApp(msg) {
       }
       if (accId) updateLead(msg.from, { fireberryId: accId });
     }
-    await logConversation(accId, msg.text, decision.reply, msg.name);
+    // תיעוד ב-CRM: רשומת סיכום אחת שמתעדכנת (לא רשומה לכל הודעה)
+    if (decision.lead_summary && accId) {
+      const rid = await upsertBotSummary(accId, decision.lead_summary, l.fireberrySummaryId);
+      if (rid && rid !== l.fireberrySummaryId) updateLead(msg.from, { fireberrySummaryId: rid });
+    }
     // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו (כרטיס חדש כבר נולד בסטטוס הזה)
     if (accId && wantsContact && !created) await touchReturningLead(accId);
     // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
