@@ -58,6 +58,16 @@ function statusFromScore(score) {
   return score >= 70 ? "hot" : "active_chat";
 }
 
+// תור עיבוד פר-ליד: הודעות מאותו מספר מטופלות ברצף (מונע כרטיסים כפולים ומרוצים)
+const inflight = new Map();
+function enqueueByPhone(phone, fn) {
+  const prev = inflight.get(phone) || Promise.resolve();
+  const next = prev.then(fn).catch((e) => console.error("[queue]", e.message));
+  inflight.set(phone, next);
+  next.finally(() => { if (inflight.get(phone) === next) inflight.delete(phone); });
+  return next;
+}
+
 // מעבד הודעת וואטסאפ אחת מ-Meta: מריץ את הבוט, שולח תשובה, מעדכן מצב
 async function processWhatsApp(msg) {
   if (alreadyProcessed(msg.id)) return;
@@ -123,8 +133,8 @@ async function processWhatsApp(msg) {
       `🔥 ליד חם — ${lead.name || msg.from} (${msg.from}) | ציון=${lead.score} | פרסונה=${lead.persona} | סיבה=${decision.handoff_reason || "ציון גבוה"}`
     );
   }
-  // שמירת השיחה ב-Fireberry (אסינכרוני, לא חוסם את המענה ללקוח)
-  (async () => {
+  // שמירת השיחה ב-Fireberry (אחרי שהתשובה כבר נשלחה ללקוח)
+  await (async () => {
     const wantsContact =
       decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
     let accId = l.fireberryId;
@@ -405,7 +415,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, { received: true });
     const messages = parseIncoming(body);
     for (const m of messages) {
-      processWhatsApp(m).catch((e) => console.error("[whatsapp] process error:", e.message));
+      enqueueByPhone(m.from, () => processWhatsApp(m));
     }
     return;
   }

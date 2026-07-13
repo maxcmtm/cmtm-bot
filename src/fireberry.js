@@ -15,28 +15,31 @@ export function waToIsraeli(phone) {
   return p;
 }
 
-// מציאת מזהה תלמיד (Account) לפי טלפון. מחזיר accountid או null.
+// מציאת מזהה תלמיד (Account) לפי טלפון — בודק כמה פורמטים נפוצים
+// (05..., 972..., +972..., עם מקף) כדי לא לפספס כרטיס קיים וליצור כפול.
 export async function findAccountByPhone(phone) {
   if (!token()) return null;
-  const local = waToIsraeli(phone);
-  try {
-    const r = await fetch(`${BASE}/api/query`, {
-      method: "POST",
-      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({
-        objecttype: 1,
-        page_size: 1,
-        fields: "accountid,firstname,telephone1,statuscode",
-        query: `(telephone1 = '${local}')`,
-      }),
-    });
-    if (!r.ok) return null;
-    const d = await r.json();
-    const recs = d?.data?.Data || d?.data?.data || [];
-    return recs[0]?.accountid || null;
-  } catch {
-    return null;
+  const local = waToIsraeli(phone); // 0546641264
+  const intl = "972" + local.slice(1);
+  const candidates = [local, intl, "+" + intl, local.slice(0, 3) + "-" + local.slice(3)];
+  for (const cand of candidates) {
+    try {
+      const r = await fetch(`${BASE}/api/query`, {
+        method: "POST",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          objecttype: 1,
+          page_size: 1,
+          fields: "accountid,firstname,telephone1,statuscode",
+          query: `(telephone1 = '${cand}')`,
+        }),
+      });
+      if (!r.ok) continue;
+      const recs = (await r.json())?.data?.Data || [];
+      if (recs[0]?.accountid) return recs[0].accountid;
+    } catch {}
   }
+  return null;
 }
 
 // סטטוסים "מוגנים" שלא דורסים: בתהליך רישום(18), מעוניין בשיעור התנסות(21),
@@ -147,6 +150,9 @@ export async function upsertBotSummary(accountId, summaryText, existingRecordId)
 // יצירת כרטיס תלמיד חדש ב-CRM (לליד וואטסאפ ישיר שנהיה חם ואין לו כרטיס)
 export async function createAccount(name, phone) {
   if (!token()) return null;
+  // בדיקה אחרונה לפני יצירה — לעולם לא יוצרים כפול
+  const existing = await findAccountByPhone(phone);
+  if (existing) return existing;
   try {
     const r = await fetch(`${BASE}/api/record/1`, {
       method: "POST",
