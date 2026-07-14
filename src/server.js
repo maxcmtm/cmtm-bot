@@ -434,7 +434,7 @@ const server = http.createServer(async (req, res) => {
     // קולט גם מ-body (JSON) וגם מ-query string (telephone/firstname/accountid)
     const q = url.searchParams;
     const phone = normalizePhone(body.phone || q.get("phone") || q.get("telephone") || "");
-    if (phone.length < 9) return send(res, 400, { error: "טלפון לא תקין" });
+    if (phone.length < 9 || phone.length > 13) return send(res, 400, { error: "טלפון לא תקין" });
     const name = body.name || q.get("name") || q.get("firstname") || "";
     const accId = body.accountId || body.fireberryId || q.get("accountId") || q.get("accountid") || "";
     const lead = enrollLead(phone, name, accId);
