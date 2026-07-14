@@ -133,6 +133,8 @@ async function processWhatsApp(msg) {
       `🔥 ליד חם — ${lead.name || msg.from} (${msg.from}) | ציון=${lead.score} | פרסונה=${lead.persona} | סיבה=${decision.handoff_reason || "ציון גבוה"}`
     );
   }
+  // אישור הגעה לאירוע — אין שום כתיבה ל-CRM (הם כבר קיימים שם, נרשמו לאירוע)
+  if (decision._guardrail === "event_confirm") return;
   // שמירת השיחה ב-Fireberry (אחרי שהתשובה כבר נשלחה ללקוח)
   await (async () => {
     const wantsContact =

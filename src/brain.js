@@ -34,6 +34,13 @@ const PRICE_FALLBACK =
 const UNSUB_REPLY =
   "הסרנו אותך מרשימת התפוצה ולא יישלחו אליך עוד הודעות 🙂 אפשר תמיד לחזור ולכתוב לנו כאן.";
 
+// זיהוי אישור הגעה (לתזכורות אירועים/יום פתוח) — תשובה קבועה, בלי AI ובלי CRM
+const CONFIRM_RE = /^(אני\s+)?(מאשר|מאשרת|מאשרים)(\s+הגעה)?[!.\s🙂👍❤️]*$|^אישור\s+הגעה[!.\s]*$|^(אני\s+)?(אגיע|מגיע|מגיעה|נגיע|בע"ה\s+אגיע)[!.\s🙂👍❤️]*$/;
+function isAttendanceConfirm(text) {
+  const t = (text || "").trim();
+  return t.length <= 30 && CONFIRM_RE.test(t);
+}
+
 /**
  * @param {object} lead - { name, persona, score, ... }
  * @param {Array<{role,content}>} history - שיחה קודמת (אופציונלי)
@@ -51,6 +58,19 @@ function humanizeDashes(text) {
 }
 
 export async function handleMessage(lead, history, incoming, askFn = askClaude) {
+  // גרדרייל 0: אישור הגעה לאירוע — תשובה קבועה, בלי מודל ובלי שום כתיבה ל-CRM
+  if (isAttendanceConfirm(incoming)) {
+    return {
+      reply: "מעולה, רשמנו את אישור ההגעה 🙂 נתראה!",
+      persona: lead.persona || "unknown",
+      intent: "smalltalk",
+      score_delta: 0,
+      handoff: false,
+      handoff_reason: "",
+      _guardrail: "event_confirm",
+    };
+  }
+
   // גרדרייל 1: הסרה — דטרמיניסטי, לא שולחים בכלל למודל
   if (isUnsubscribe(incoming)) {
     return {
