@@ -33,6 +33,15 @@ export const SEQUENCE = [
 
 const firstName = (name) => (name || "").trim().split(/\s+/)[0] || "מתעניין";
 
+// שקט בשבת (שעון ישראל): שישי מ-15:00 ועד מוצ"ש 21:00 — לא שולחים הודעות יזומות.
+// מה שהוחמץ נשלח אוטומטית בבדיקה הראשונה אחרי צאת השבת.
+export function isShabbat(d = null) {
+  const now = d || new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+  const day = now.getDay(); // 5=שישי, 6=שבת
+  const hour = now.getHours();
+  return (day === 5 && hour >= 15) || (day === 6 && hour < 21);
+}
+
 // שולח שלב בודד לליד ומעדכן את מצבו
 async function sendStep(lead, step) {
   const tmpl = SEQUENCE[step];
@@ -59,19 +68,24 @@ export async function startSequence(lead) {
   }
   if (lead.seqStep >= 0) return; // כבר התחיל
   if (lead.status === "unsubscribed") return; // ביקש שלא נפנה אליו
+  if (isShabbat()) {
+    console.log(`🕯️ שבת — הודעת הפתיחה ל-${lead.name || lead.id} תישלח במוצ"ש`);
+    return; // runDripCheck ישלים את הפתיחה אחרי שבת (seqStep נשאר -1)
+  }
   await sendStep(lead, 0);
 }
 
 // בדיקה תקופתית: מי בשל לשלב הבא
 export async function runDripCheck() {
   if (!config.drip.enabled || isPaused()) return 0;
+  if (isShabbat()) return 0; // אין הודעות יזומות בשבת
   const now = Date.now();
   const stepMs = config.drip.stepDays * 24 * 60 * 60 * 1000;
   const quietMs = config.drip.quietHours * 60 * 60 * 1000; // לא לשלוח אם ענה לאחרונה
   let sent = 0;
   for (const lead of allLeads()) {
     if (lead.status !== "in_sequence") continue; // active_chat/hot/unsubscribed/cold לא מקבלים
-    if (lead.seqStep < 0) continue; // עוד לא נשלחה פתיחה (startSequence יטפל)
+    if (lead.seqStep < 0) { await sendStep(lead, 0); sent++; continue; } // פתיחה שהוחמצה (נכנס בשבת) — משלימים עכשיו
     if (lead.seqStep >= SEQUENCE.length - 1) continue; // סיים רצף
     if (now - lead.lastDripTs < stepMs) continue; // עוד לא עברו X ימים
     if (lead.lastInboundTs && now - lead.lastInboundTs < quietMs) continue; // בשיחה פעילה
@@ -89,6 +103,7 @@ const NUDGE_TEXT =
 
 export async function runNudgeCheck() {
   if (!config.drip.enabled || isPaused()) return 0;
+  if (isShabbat()) return 0; // אין תזכורות בשבת
   const now = Date.now();
   let sent = 0;
   for (const lead of allLeads()) {
