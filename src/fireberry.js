@@ -230,3 +230,66 @@ export async function markOptedOut(accountId) {
 export async function updateLead() {
   return { dryRun: true };
 }
+
+// ===== מנקה תאומים: מוחק כרטיסי-זבל שנוצרים ע"י אינטגרציה פגומה =====
+// חתימת התאום (כל התנאים חייבים להתקיים — בטיחות לפני הכל):
+//   1. בלי שם (ריק או "ללא שם")  2. סטטוס עדיין "חדש" (11)
+//   3. הטלפון זהה לכרטיס אחר עם שם שנוצר באותן 2 דקות, או טלפון פגום (15+ ספרות)
+export async function sweepTwinLeads(sinceHours = 3) {
+  if (!token()) return { deleted: 0 };
+  const cutoff = new Date(Date.now() - sinceHours * 3600000)
+    .toLocaleString("sv-SE", { timeZone: "Asia/Jerusalem" }).replace(" ", "T");
+  const recent = [];
+  for (let page = 1; page <= 20; page++) {
+    let recs = null;
+    for (let att = 0; att < 4; att++) {
+      try {
+        const r = await fetch(`${BASE}/api/query`, {
+          method: "POST",
+          headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ objecttype: 1, page_size: 100, page_number: page,
+            fields: "accountid,accountname,telephone1,createdon,statuscode",
+            sort_by: "createdon", sort_type: "desc" }),
+        });
+        if (r.status === 429) { await new Promise((x) => setTimeout(x, 30000)); continue; }
+        if (!r.ok) return { deleted: 0 };
+        recs = (await r.json())?.data?.Data || [];
+        break;
+      } catch { await new Promise((x) => setTimeout(x, 10000)); }
+    }
+    if (!recs) return { deleted: 0 };
+    let reachedCutoff = false;
+    for (const x of recs) {
+      if (x.createdon < cutoff) { reachedCutoff = true; break; }
+      recent.push(x);
+    }
+    if (reachedCutoff || recs.length < 100) break;
+    await new Promise((x) => setTimeout(x, 1500));
+  }
+
+  const nameless = (x) => !x.accountname || x.accountname.trim() === "" || x.accountname.trim() === "ללא שם";
+  const isNew = (x) => Number(x.statuscode) === 11 || Number(x.statuscode) === 23;
+  const toDelete = [];
+  for (const x of recent) {
+    if (!nameless(x) || !isNew(x)) continue;
+    const phone = String(x.telephone1 || "");
+    if (phone.replace(/\D/g, "").length >= 15) { toDelete.push({ ...x, reason: "טלפון פגום" }); continue; }
+    // תאום של כרטיס שמי עם אותו טלפון, שנוצר עד 2 דקות לפניו — והכרטיס השמי עדיין קיים
+    const keeper = recent.find((k) => k.accountid !== x.accountid && !nameless(k) &&
+      String(k.telephone1 || "") === phone &&
+      Math.abs(new Date(x.createdon) - new Date(k.createdon)) < 120000);
+    if (keeper) toDelete.push({ ...x, reason: `תאום של "${keeper.accountname}"` });
+  }
+
+  let deleted = 0;
+  for (const x of toDelete) {
+    try {
+      const d = await fetch(`${BASE}/api/record/1/${x.accountid}`, {
+        method: "DELETE", headers: { tokenid: token() } });
+      if (d.ok) { deleted++; console.log(`🧹 נמחק תאום-זבל: טל ${x.telephone1} (${x.reason})`); }
+    } catch {}
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+  if (deleted) console.log(`🧹 מנקה התאומים: נמחקו ${deleted} כרטיסי זבל`);
+  return { deleted, scanned: recent.length };
+}

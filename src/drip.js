@@ -2,6 +2,7 @@
 import { config } from "./config.js";
 import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
 import { sendTemplate, sendText } from "./whatsapp.js";
+import { sweepTwinLeads } from "./fireberry.js";
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
 const STEP_CONTEXT = [
@@ -135,6 +136,7 @@ export function startDripScheduler() {
   timer = setInterval(() => {
     runDripCheck().catch((e) => console.error("[drip]", e.message));
     runNudgeCheck().catch((e) => console.error("[nudge]", e.message));
+    sweepTwinLeads(3).catch((e) => console.error("[sweep]", e.message)); // ניקוי תאומי-זבל מה-CRM
   }, everyMs);
   console.log(
     `⏰ מנוע חימום פעיל: בדיקה כל ${config.drip.checkMinutes} דק' · מרווח ${config.drip.stepDays} ימים בין הודעות`
