@@ -23,21 +23,27 @@ export async function findAccountByPhone(phone) {
   const intl = "972" + local.slice(1);
   const candidates = [local, intl, "+" + intl, local.slice(0, 3) + "-" + local.slice(3)];
   for (const cand of candidates) {
-    try {
-      const r = await fetch(`${BASE}/api/query`, {
-        method: "POST",
-        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({
-          objecttype: 1,
-          page_size: 1,
-          fields: "accountid,firstname,telephone1,statuscode",
-          query: `(telephone1 = '${cand}')`,
-        }),
-      });
-      if (!r.ok) continue;
-      const recs = (await r.json())?.data?.Data || [];
-      if (recs[0]?.accountid) return recs[0].accountid;
-    } catch {}
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const r = await fetch(`${BASE}/api/query`, {
+          method: "POST",
+          headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({
+            objecttype: 1,
+            page_size: 1,
+            fields: "accountid,firstname,telephone1,statuscode",
+            query: `(telephone1 = '${cand}')`,
+          }),
+        });
+        if (r.status === 429) { await new Promise((x) => setTimeout(x, 15000)); continue; } // עומס — מנסים שוב, לא מוותרים
+        if (!r.ok) break;
+        const recs = (await r.json())?.data?.Data || [];
+        if (recs[0]?.accountid) return recs[0].accountid;
+        break; // תשובה תקינה בלי תוצאה — עוברים לפורמט הבא
+      } catch {
+        await new Promise((x) => setTimeout(x, 5000));
+      }
+    }
   }
   return null;
 }
