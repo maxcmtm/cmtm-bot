@@ -268,7 +268,11 @@ export async function sweepTwinLeads(sinceHours = 3) {
   }
 
   const nameless = (x) => !x.accountname || x.accountname.trim() === "" || x.accountname.trim() === "ללא שם";
-  const isNew = (x) => Number(x.statuscode) === 11 || Number(x.statuscode) === 23;
+  // בשאילתות statuscode חוזר כטקסט ("חדש ✨"), ב-GET כמספר — תומכים בשניהם
+  const isNew = (x) => {
+    const s = String(x.statuscode ?? "").trim();
+    return s === "11" || s === "23" || s.startsWith("חדש") || s.startsWith("פנייה חוזרת");
+  };
   const toDelete = [];
   for (const x of recent) {
     if (!nameless(x) || !isNew(x)) continue;
