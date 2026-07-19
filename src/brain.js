@@ -61,7 +61,7 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude) 
   // גרדרייל 0: אישור הגעה לאירוע — תשובה קבועה, בלי מודל ובלי שום כתיבה ל-CRM
   if (isAttendanceConfirm(incoming)) {
     return {
-      reply: "מעולה, רשמנו את אישור ההגעה 🙂 נתראה!",
+      reply: "תודה! נתראה מחר 🙂",
       persona: lead.persona || "unknown",
       intent: "smalltalk",
       score_delta: 0,

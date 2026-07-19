@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
@@ -133,8 +133,13 @@ async function processWhatsApp(msg) {
       `🔥 ליד חם — ${lead.name || msg.from} (${msg.from}) | ציון=${lead.score} | פרסונה=${lead.persona} | סיבה=${decision.handoff_reason || "ציון גבוה"}`
     );
   }
-  // אישור הגעה לאירוע — אין שום כתיבה ל-CRM (הם כבר קיימים שם, נרשמו לאירוע)
-  if (decision._guardrail === "event_confirm") return;
+  // אישור הגעה לאירוע — מעדכנים רק את רשומת "הרשמה לשיעור התנסות" (לא נוגעים בליד עצמו)
+  if (decision._guardrail === "event_confirm") {
+    confirmTrialAttendance(msg.from)
+      .then((r) => { if (!r.ok) console.log(`⚠️ אישור הגעה לא עודכן ב-CRM (${msg.from}): ${r.reason}`); })
+      .catch((e) => console.error("[confirm]", e.message));
+    return;
+  }
   // שמירת השיחה ב-Fireberry (אחרי שהתשובה כבר נשלחה ללקוח)
   await (async () => {
     const wantsContact =

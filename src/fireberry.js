@@ -231,6 +231,39 @@ export async function updateLead() {
   return { dryRun: true };
 }
 
+// אישור הגעה לשיעור התנסות: מאתר את רשומת "הרשמה לשיעור התנסות" (1008) האחרונה
+// של הליד ומעדכן סטטוס (pcfsystemfield104) ל"אישר הגעה טלפונית" (2)
+export async function confirmTrialAttendance(phone) {
+  if (!token()) return { ok: false, reason: "אין טוקן" };
+  const accId = await findAccountByPhone(phone);
+  if (!accId) return { ok: false, reason: "אין כרטיס תלמיד" };
+  for (let att = 1; att <= 3; att++) {
+    try {
+      const r = await fetch(`${BASE}/api/query`, {
+        method: "POST",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ objecttype: 1008, page_size: 1,
+          fields: "customobject1008id,pcfsystemfield104",
+          query: `(pcfsystemfield101 = '${accId}')`,
+          sort_by: "createdon", sort_type: "desc" }),
+      });
+      if (r.status === 429) { await new Promise((x) => setTimeout(x, 15000)); continue; }
+      if (!r.ok) return { ok: false, reason: `query ${r.status}` };
+      const reg = ((await r.json())?.data?.Data || [])[0];
+      if (!reg) return { ok: false, reason: "אין רשומת הרשמה לשיעור התנסות" };
+      const u = await fetch(`${BASE}/api/record/1008/${reg.customobject1008id}`, {
+        method: "PUT",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ pcfsystemfield104: "2" }), // אישר הגעה טלפונית
+      });
+      if (!u.ok) return { ok: false, reason: `update ${u.status}` };
+      console.log(`✅ אישור הגעה עודכן ברשומת ההרשמה (${phone})`);
+      return { ok: true };
+    } catch (e) { await new Promise((x) => setTimeout(x, 5000)); }
+  }
+  return { ok: false, reason: "network" };
+}
+
 // ===== מנקה תאומים: מוחק כרטיסי-זבל שנוצרים ע"י אינטגרציה פגומה =====
 // חתימת התאום (כל התנאים חייבים להתקיים — בטיחות לפני הכל):
 //   1. בלי שם (ריק או "ללא שם")  2. סטטוס עדיין "חדש" (11)
