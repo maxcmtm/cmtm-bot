@@ -49,6 +49,14 @@ export function setGroqToken(t) {
   state.runtime.groqToken = t || "";
   save();
 }
+// טלפון מנהלת המכירות להתראות ליד חם (וואטסאפ)
+export function getAlertPhone() {
+  return state.runtime?.alertPhone || "";
+}
+export function setAlertPhone(p) {
+  state.runtime.alertPhone = p || "";
+  save();
+}
 // דוחות סקירה שבועית (נכתבים ע"י סוכן מתוזמן, מוצגים בדאשבורד)
 export function saveReport(text) {
   if (!state.reports) state.reports = [];

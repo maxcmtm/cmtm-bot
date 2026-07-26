@@ -9,8 +9,8 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli } from "./fireberry.js";
+import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   alreadyProcessed,
   getHistory,
@@ -30,6 +30,8 @@ import {
   clearFailures,
   saveReport,
   latestReport,
+  getAlertPhone,
+  setAlertPhone,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 
@@ -120,11 +122,22 @@ async function processWhatsApp(msg) {
     nudgedTs: 0, // ענה — אפשר יהיה לתזכר שוב אם ייעלם שוב
   };
   if (decision.lead_summary) updFields.summary = decision.lead_summary;
+  const wasHot = lead.status === "hot";
   const l = updateLead(msg.from, updFields);
   let status = "active_chat";
   if (decision.intent === "unsubscribe") status = "unsubscribed";
   else if (decision.handoff || l.score >= 70) status = "hot";
   updateLead(msg.from, { status });
+  const becameHot = status === "hot" && !wasHot;
+  // התראת וואטסאפ למנהלת המכירות ברגע שליד נהיה חם (תבנית hot_lead_alert)
+  if (becameHot && getAlertPhone()) {
+    sendTemplate(getAlertPhone(), "hot_lead_alert", [
+      msg.name || l.name || "ללא שם",
+      waToIsraeli(msg.from),
+      (decision.handoff_reason || "ציון חום גבוה").slice(0, 120),
+    ]).then((r) => { if (!r.ok && !r.dryRun) console.error("[alert] שליחת התראת ליד חם נכשלה"); })
+      .catch((e) => console.error("[alert]", e.message));
+  }
   pushTurn(msg.from, msg.text, decision.reply);
   const sent = await sendText(msg.from, decision.reply);
   console.log(`💬 → ${msg.from}: ${decision.reply}  ${sent.ok ? "[נשלח✓]" : sent.dryRun ? "[יבש]" : "[שגיאת שליחה]"}`);
@@ -160,6 +173,8 @@ async function processWhatsApp(msg) {
       const rid = await upsertBotSummary(accId, decision.lead_summary, l.fireberrySummaryId);
       if (rid && rid !== l.fireberrySummaryId) updateLead(msg.from, { fireberrySummaryId: rid });
     }
+    // ליד שנהיה חם — מסמנים דירוג "ליד חם" בכרטיס (לתצוגת מנהלת המכירות)
+    if (accId && l.status === "hot") await markHotLead(accId);
     // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו (כרטיס חדש כבר נולד בסטטוס הזה)
     if (accId && wantsContact && !created) await touchReturningLead(accId);
     // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
@@ -391,6 +406,10 @@ const server = http.createServer(async (req, res) => {
     if (body.fireberryToken && body.fireberryToken.length >= 10) {
       setFireberryToken(body.fireberryToken);
       updated.push("fireberry");
+    }
+    if (body.alertPhone) {
+      setAlertPhone(normalizePhone(body.alertPhone));
+      updated.push("alertPhone");
     }
     if (body.groqToken && body.groqToken.length >= 10) {
       setGroqToken(body.groqToken);

@@ -231,6 +231,25 @@ export async function updateLead() {
   return { dryRun: true };
 }
 
+// סימון ליד חם בכרטיס התלמיד: דירוג (accountratingcode) = 6.
+// משמש את מנהלת המכירות לתצוגת "לידים חמים" ב-Fireberry.
+export async function markHotLead(accountId) {
+  if (!token() || !accountId) return { ok: false };
+  try {
+    const u = await fetch(`${BASE}/api/record/1/${accountId}`, {
+      method: "PUT",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ accountratingcode: 6 }),
+    });
+    if (!u.ok) return { ok: false };
+    console.log(`🔥 סומן דירוג ליד חם ב-Fireberry (${accountId})`);
+    return { ok: true };
+  } catch (e) {
+    console.error("[fireberry] markHotLead:", e.message);
+    return { ok: false };
+  }
+}
+
 // אישור הגעה לשיעור התנסות: מאתר את רשומת "הרשמה לשיעור התנסות" (1008) האחרונה
 // של הליד ומעדכן סטטוס (pcfsystemfield104) ל"אישר הגעה טלפונית" (2)
 export async function confirmTrialAttendance(phone) {
