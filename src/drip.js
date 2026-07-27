@@ -76,23 +76,52 @@ export async function startSequence(lead) {
   await sendStep(lead, 0);
 }
 
-// בדיקה תקופתית: מי בשל לשלב הבא
+// בדיקה תקופתית: מי בשל לשלב הבא.
+// הגנת איכות מספר (מדיניות אנטי-ספאם):
+//   1. תקרה יומית (dailyCap) ותקרה לסבב (runCap) — אין יותר פרצים של מאות תבניות בשעה,
+//      וההשלמה של מוצ"ש מתפזרת על פני שעות/ימים אוטומטית.
+//   2. ריווח של כמה שניות בין שליחות.
+//   3. ליד שמעולם לא ענה עוצר אחרי maxSilentStep — לא ממשיכים לשלוח שיווק למי שמתעלם,
+//      כי אלה ההודעות שנחסמות ומדווחות ומורידות את דירוג האיכות.
 export async function runDripCheck() {
   if (!config.drip.enabled || isPaused()) return 0;
   if (isShabbat()) return 0; // אין הודעות יזומות בשבת
   const now = Date.now();
   const stepMs = config.drip.stepDays * 24 * 60 * 60 * 1000;
   const quietMs = config.drip.quietHours * 60 * 60 * 1000; // לא לשלוח אם ענה לאחרונה
-  let sent = 0;
+
+  // כמה תבניות כבר נשלחו היום (מאז חצות שעון ישראל)
+  const il = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+  const midnight = now - (il.getHours() * 3600 + il.getMinutes() * 60 + il.getSeconds()) * 1000;
+  const sentToday = allLeads().filter((l) => l.lastDripTs && l.lastDripTs >= midnight).length;
+  const budget = Math.min(config.drip.runCap, Math.max(0, config.drip.dailyCap - sentToday));
+
+  const due = [];
+  let pruned = 0;
   for (const lead of allLeads()) {
     if (lead.status !== "in_sequence") continue; // active_chat/hot/unsubscribed/cold לא מקבלים
-    if (lead.seqStep < 0) { await sendStep(lead, 0); sent++; continue; } // פתיחה שהוחמצה (נכנס בשבת) — משלימים עכשיו
+    if (lead.seqStep < 0) { due.push({ lead, step: 0 }); continue; } // פתיחה שהוחמצה (נכנס בשבת)
     if (lead.seqStep >= SEQUENCE.length - 1) continue; // סיים רצף
     if (now - lead.lastDripTs < stepMs) continue; // עוד לא עברו X ימים
     if (lead.lastInboundTs && now - lead.lastInboundTs < quietMs) continue; // בשיחה פעילה
-    await sendStep(lead, lead.seqStep + 1);
-    sent++;
+    if (!lead.lastInboundTs && lead.seqStep + 1 > config.drip.maxSilentStep) {
+      updateLead(lead.id, { status: "cold" }); // שקט לאורך כל הדרך — מפסיקים בעדינות
+      pruned++;
+      continue;
+    }
+    due.push({ lead, step: lead.seqStep + 1 });
   }
+  due.sort((a, b) => a.step - b.step); // עדיפות ללידים טריים (שלבים מוקדמים)
+
+  let sent = 0;
+  for (const { lead, step } of due) {
+    if (sent >= budget) break;
+    await sendStep(lead, step);
+    sent++;
+    await new Promise((r) => setTimeout(r, 3000)); // ריווח בין שליחות
+  }
+  if (pruned) console.log(`✂️ הרצף נעצר ל-${pruned} לידים שקטים (לא ענו עד שלב ${config.drip.maxSilentStep})`);
+  if (due.length > sent) console.log(`⏳ תקרת קצב: ${due.length - sent} בשלים ימתינו לסבב הבא (נשלחו היום ${sentToday + sent}/${config.drip.dailyCap})`);
   if (sent) console.log(`🔥 מנוע חימום: נשלחו ${sent} הודעות`);
   return sent;
 }

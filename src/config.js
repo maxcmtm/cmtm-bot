@@ -62,6 +62,9 @@ export const config = {
     stepDays: Number(process.env.DRIP_STEP_DAYS || 3), // מרווח בין הודעות חימום
     quietHours: Number(process.env.DRIP_QUIET_HOURS || 48), // לא לשלוח אם ענה לאחרונה
     checkMinutes: Number(process.env.DRIP_CHECK_MINUTES || 60), // תדירות בדיקת הסקדולר
+    dailyCap: Number(process.env.DRIP_DAILY_CAP || 200), // תקרת תבניות ליום (הגנת איכות מספר מול מטא)
+    runCap: Number(process.env.DRIP_RUN_CAP || 30), // תקרה לסבב בדיקה אחד — מפזר את העומס על היום
+    maxSilentStep: Number(process.env.DRIP_MAX_SILENT_STEP || 5), // ליד שמעולם לא ענה עוצר אחרי שלב זה
   },
   links: {
     tasteLesson: process.env.LINK_TASTE_LESSON || "https://cmtm.co.il/free-lessons/",
