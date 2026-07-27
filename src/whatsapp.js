@@ -43,6 +43,20 @@ export function parseIncoming(body) {
   return out;
 }
 
+// דירוג איכות המספר אצל מטא: GREEN / YELLOW / RED / UNKNOWN
+export async function getNumberQuality() {
+  if (!activeToken() || !config.whatsapp.phoneNumberId) return "UNKNOWN";
+  try {
+    const r = await fetch(`${GRAPH}/${config.whatsapp.phoneNumberId}?fields=quality_rating`, {
+      headers: { authorization: `Bearer ${activeToken()}` },
+    });
+    if (!r.ok) return "UNKNOWN";
+    return (await r.json())?.quality_rating || "UNKNOWN";
+  } catch {
+    return "UNKNOWN";
+  }
+}
+
 // שליחת תבנית מאושרת (Marketing) ללקוח. params = מערך ערכים ל-{{1}}, {{2}}...
 export async function sendTemplate(to, templateName, params = []) {
   if (!activeToken() || !config.whatsapp.phoneNumberId) {

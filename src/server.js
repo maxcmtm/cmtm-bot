@@ -242,14 +242,15 @@ const server = http.createServer(async (req, res) => {
     if (url.searchParams.get("secret") !== config.webhookSecret) {
       return send(res, 401, { error: "unauthorized" });
     }
-    let tokenValid = false, tokenErr = "";
+    let tokenValid = false, tokenErr = "", quality = "UNKNOWN";
     try {
       const r = await fetch(
-        `https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}?fields=display_phone_number`,
+        `https://graph.facebook.com/v21.0/${config.whatsapp.phoneNumberId}?fields=display_phone_number,quality_rating`,
         { headers: { authorization: `Bearer ${activeToken()}` } }
       );
       tokenValid = r.ok;
-      if (!r.ok) tokenErr = (await r.text()).slice(0, 200);
+      if (r.ok) quality = (await r.json())?.quality_rating || "UNKNOWN";
+      else tokenErr = (await r.text()).slice(0, 200);
     } catch (e) {
       tokenErr = e.message;
     }
@@ -259,6 +260,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       tokenValid,
       tokenErr,
+      numberQuality: quality,
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
       paused: isPaused(),

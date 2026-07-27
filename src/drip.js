@@ -1,7 +1,7 @@
 // מנוע החימום: שולח את התבנית הבאה ברצף ללידים שלא ענו, כל X ימים.
 import { config } from "./config.js";
 import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
-import { sendTemplate, sendText } from "./whatsapp.js";
+import { sendTemplate, sendText, getNumberQuality } from "./whatsapp.js";
 import { sweepTwinLeads } from "./fireberry.js";
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
@@ -90,11 +90,20 @@ export async function runDripCheck() {
   const stepMs = config.drip.stepDays * 24 * 60 * 60 * 1000;
   const quietMs = config.drip.quietHours * 60 * 60 * 1000; // לא לשלוח אם ענה לאחרונה
 
+  // התאמת קצב לדירוג האיכות של המספר אצל מטא: RED = עצירה מלאה, YELLOW = חצי קצב
+  const quality = await getNumberQuality();
+  let dailyCap = config.drip.dailyCap;
+  if (quality === "RED") {
+    console.log("🛑 דירוג איכות המספר RED — שליחת תבניות מושהית אוטומטית עד התאוששות");
+    return 0;
+  }
+  if (quality === "YELLOW") dailyCap = Math.max(20, Math.floor(config.drip.dailyCap / 2));
+
   // כמה תבניות כבר נשלחו היום (מאז חצות שעון ישראל)
   const il = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
   const midnight = now - (il.getHours() * 3600 + il.getMinutes() * 60 + il.getSeconds()) * 1000;
   const sentToday = allLeads().filter((l) => l.lastDripTs && l.lastDripTs >= midnight).length;
-  const budget = Math.min(config.drip.runCap, Math.max(0, config.drip.dailyCap - sentToday));
+  const budget = Math.min(config.drip.runCap, Math.max(0, dailyCap - sentToday));
 
   const due = [];
   let pruned = 0;
@@ -121,7 +130,7 @@ export async function runDripCheck() {
     await new Promise((r) => setTimeout(r, 3000)); // ריווח בין שליחות
   }
   if (pruned) console.log(`✂️ הרצף נעצר ל-${pruned} לידים שקטים (לא ענו עד שלב ${config.drip.maxSilentStep})`);
-  if (due.length > sent) console.log(`⏳ תקרת קצב: ${due.length - sent} בשלים ימתינו לסבב הבא (נשלחו היום ${sentToday + sent}/${config.drip.dailyCap})`);
+  if (due.length > sent) console.log(`⏳ תקרת קצב: ${due.length - sent} בשלים ימתינו לסבב הבא (נשלחו היום ${sentToday + sent}/${dailyCap}, דירוג ${quality})`);
   if (sent) console.log(`🔥 מנוע חימום: נשלחו ${sent} הודעות`);
   return sent;
 }
