@@ -34,6 +34,21 @@ const PRICE_FALLBACK =
 const UNSUB_REPLY =
   "הסרנו אותך מרשימת התפוצה ולא יישלחו אליך עוד הודעות 🙂 אפשר תמיד לחזור ולכתוב לנו כאן.";
 
+// זיהוי מחפשי עבודה (מודעת דרושים מפנה למספר הזה) — תשובה קבועה, בלי מודל.
+// רק בתחילת שיחה ורק על ביטויים חד-משמעיים, כדי לא לפגוע בליד אמיתי ששואל על תעסוקה אחרי הלימודים.
+const JOB_WORDS = [
+  "קורות חיים", 'קו"ח', "קוח שלי", "מחפש עבודה", "מחפשת עבודה",
+  "לגבי המשרה", "בנוגע למשרה", "על המשרה", "הגשתי מועמדות",
+  "מודעת הדרושים", "מודעת דרושים", "ראיון עבודה", "התפנתה משרה", "יש משרה",
+];
+const JOB_REPLY =
+  "היי 🙂 המספר הזה נותן מידע על לימודים במכללת תרפיית מימדים. אם פנית בנוגע למשרה, אפשר לשלוח קורות חיים למייל office@cmtm.co.il והצוות המתאים יחזור אליך. בהצלחה!";
+function isJobSeeker(text, history) {
+  if (history && history.length > 2) return false; // שיחה מתקדמת — לא מסננים
+  const t = text || "";
+  return JOB_WORDS.some((w) => t.includes(w));
+}
+
 // זיהוי אישור הגעה (לתזכורות אירועים/יום פתוח) — תשובה קבועה, בלי AI ובלי CRM
 const CONFIRM_RE = /^(אני\s+)?(מאשר|מאשרת|מאשרים)(\s+הגעה)?[!.\s🙂👍❤️]*$|^אישור\s+הגעה[!.\s]*$|^(אני\s+)?(אגיע|מגיע|מגיעה|נגיע|בע"ה\s+אגיע)[!.\s🙂👍❤️]*$/;
 function isAttendanceConfirm(text) {
@@ -68,6 +83,19 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude) 
       handoff: false,
       handoff_reason: "",
       _guardrail: "event_confirm",
+    };
+  }
+
+  // גרדרייל 0.5: מחפש עבודה — תשובה קבועה, בלי מודל (חוסך קריאות Sonnet על קהל לא רלוונטי)
+  if (isJobSeeker(incoming, history)) {
+    return {
+      reply: JOB_REPLY,
+      persona: lead.persona || "unknown",
+      intent: "smalltalk",
+      score_delta: 0,
+      handoff: false,
+      handoff_reason: "",
+      _guardrail: "job_seeker",
     };
   }
 
