@@ -43,6 +43,14 @@ export function isShabbat(d = null) {
   return (day === 5 && hour >= 15) || (day === 6 && hour < 21);
 }
 
+// שעות שקט (שעון ישראל): אין הודעות יזומות בין 21:00 ל-09:00.
+// ליד לא אמור לקבל שיווק ב-2 בלילה — זה גם מעצבן וגם מזמין דיווחי ספאם.
+export function isQuietHours(d = null) {
+  const now = d || new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" }));
+  const hour = now.getHours();
+  return hour >= 21 || hour < 9;
+}
+
 // שולח שלב בודד לליד ומעדכן את מצבו
 async function sendStep(lead, step) {
   const tmpl = SEQUENCE[step];
@@ -69,6 +77,10 @@ export async function startSequence(lead) {
   }
   if (lead.seqStep >= 0) return; // כבר התחיל
   if (lead.status === "unsubscribed") return; // ביקש שלא נפנה אליו
+  if (isQuietHours()) {
+    console.log(`🌙 שעות שקט — הודעת הפתיחה ל-${lead.name || lead.id} תישלח בבוקר`);
+    return; // runDripCheck ישלים בבוקר (seqStep נשאר -1)
+  }
   if (isShabbat()) {
     console.log(`🕯️ שבת — הודעת הפתיחה ל-${lead.name || lead.id} תישלח במוצ"ש`);
     return; // runDripCheck ישלים את הפתיחה אחרי שבת (seqStep נשאר -1)
@@ -86,6 +98,7 @@ export async function startSequence(lead) {
 export async function runDripCheck() {
   if (!config.drip.enabled || isPaused()) return 0;
   if (isShabbat()) return 0; // אין הודעות יזומות בשבת
+  if (isQuietHours()) return 0; // אין הודעות יזומות בלילה — השלמה בבוקר
   const now = Date.now();
   const stepMs = config.drip.stepDays * 24 * 60 * 60 * 1000;
   const quietMs = config.drip.quietHours * 60 * 60 * 1000; // לא לשלוח אם ענה לאחרונה
@@ -143,6 +156,7 @@ const NUDGE_TEXT =
 export async function runNudgeCheck() {
   if (!config.drip.enabled || isPaused()) return 0;
   if (isShabbat()) return 0; // אין תזכורות בשבת
+  if (isQuietHours()) return 0; // אין תזכורות בלילה
   const now = Date.now();
   let sent = 0;
   for (const lead of allLeads()) {
