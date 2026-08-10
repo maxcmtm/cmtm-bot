@@ -113,6 +113,12 @@ async function processWhatsApp(msg) {
     );
     return;
   }
+  // הודעה חוזרת בפעם השלישית+ — רושמים ולא עונים (שובר לולאות משיבונים)
+  if (decision._silent) {
+    pushTurn(msg.from, msg.text, "[הודעה חוזרת — לא נשלחה תשובה]");
+    console.log(`🔇 לולאת הודעות מ-${msg.name || msg.from} — אין מענה`);
+    return;
+  }
   // עדכון מצב: ליד שענה משהה את רצף החימום
   const updFields = {
     persona: decision.persona,

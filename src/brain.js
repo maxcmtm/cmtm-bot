@@ -34,6 +34,14 @@ const PRICE_FALLBACK =
 const UNSUB_REPLY =
   "הסרנו אותך מרשימת התפוצה ולא יישלחו אליך עוד הודעות 🙂 אפשר תמיד לחזור ולכתוב לנו כאן.";
 
+// לולאת הודעות חוזרות (משיבונים אוטומטיים של עסקים): אותה הודעה שוב ושוב.
+// פעם שנייה — תשובה קצרה קבועה. פעם שלישית ומעלה — שתיקה (לא עונים בכלל).
+function repeatCount(text, history) {
+  const t = (text || "").trim();
+  if (t.length < 8) return 0; // "תודה"/"טוב" קצרים לא נחשבים לולאה
+  return (history || []).filter((m) => m.role === "user" && (m.content || "").trim() === t).length;
+}
+
 // זיהוי מחפשי עבודה (מודעת דרושים מפנה למספר הזה) — תשובה קבועה, בלי מודל.
 // רק בתחילת שיחה ורק על ביטויים חד-משמעיים, כדי לא לפגוע בליד אמיתי ששואל על תעסוקה אחרי הלימודים.
 const JOB_WORDS = [
@@ -83,6 +91,20 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude) 
       handoff: false,
       handoff_reason: "",
       _guardrail: "event_confirm",
+    };
+  }
+
+  // גרדרייל 0.3: הודעה זהה שחוזרת (משיבון אוטומטי) — לא שורפים קריאות מודל על לולאה
+  const repeats = repeatCount(incoming, history);
+  if (repeats >= 2) {
+    return { reply: null, persona: lead.persona || "unknown", intent: "smalltalk",
+      score_delta: 0, handoff: false, handoff_reason: "", _guardrail: "repeat_loop", _silent: true };
+  }
+  if (repeats === 1) {
+    return {
+      reply: "נראה שההודעה נשלחה שוב אוטומטית 🙂 אם יש שאלה אמיתית, אני כאן!",
+      persona: lead.persona || "unknown", intent: "smalltalk",
+      score_delta: 0, handoff: false, handoff_reason: "", _guardrail: "repeat_loop",
     };
   }
 
