@@ -111,8 +111,7 @@ async function processWhatsApp(msg) {
     // קרדיט Anthropic נגמר — מתריעים למקס מיד (הוואטסאפ עדיין עובד בתרחיש הזה)
     if (/credit balance is too low/i.test(err.message || "")) {
       alertAdmin("anthropic_credit",
-        "🔴 הקרדיט של Anthropic נגמר — נועה לא עונה ללידים!
-טעינה: console.anthropic.com → Plans & Billing (ושווה להפעיל שם Auto-reload).", 6).catch(() => {});
+        "🔴 הקרדיט של Anthropic נגמר — נועה לא עונה ללידים!\nטעינה: console.anthropic.com → Plans & Billing (ושווה להפעיל שם Auto-reload).", 6).catch(() => {});
     }
     await sendText(
       msg.from,
