@@ -12,6 +12,8 @@ import { summarizeLead } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
+  getLastAlert,
+  setLastAlert,
   alreadyProcessed,
   getHistory,
   pushTurn,
@@ -158,6 +160,20 @@ async function processWhatsApp(msg) {
       `🔥 ליד חם — ${lead.name || msg.from} (${msg.from}) | ציון=${lead.score} | פרסונה=${lead.persona} | סיבה=${decision.handoff_reason || "ציון גבוה"}`
     );
   }
+  // ליד שמתלונן שלא חזרו אליו — אזעקה למנהלת המכירות (גם אם כבר סומן חם בעבר)
+  const COMPLAINT_RE = /לא חזרו אלי|לא חוזרים אלי|אף אחד לא (עונה|חוזר|מגיב)|למה לא (חוזרים|התקשרתם)|עדיין לא (חזרו|התקשרו)|מחכה שיחזרו/;
+  if (COMPLAINT_RE.test(msg.text || "") && getAlertPhone()) {
+    const key = `complaint_${msg.from}`;
+    if (Date.now() - getLastAlert(key) > 12 * 3600000) {
+      sendTemplate(getAlertPhone(), "hot_lead_alert", [
+        `${msg.name || l.name || "ללא שם"} 🚨🚨`,
+        waToIsraeli(msg.from),
+        "הליד מתלונן שלא חזרו אליו! לטיפול מיידי",
+      ]).then((r) => { if (r.ok || r.dryRun) { setLastAlert(key); console.log(`🚨 אזעקת תלונה נשלחה למנהלת (${msg.from})`); } })
+        .catch(() => {});
+    }
+  }
+
   // אישור הגעה לאירוע — מעדכנים רק את רשומת "הרשמה לשיעור התנסות" (לא נוגעים בליד עצמו)
   if (decision._guardrail === "event_confirm") {
     confirmTrialAttendance(msg.from)
