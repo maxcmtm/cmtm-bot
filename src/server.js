@@ -34,6 +34,7 @@ import {
   setAlertPhone,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
+import { alertAdmin, runWatchdog } from "./watchdog.js";
 
 // המרת טלפון לפורמט וואטסאפ בינלאומי: 0546641264 → 972546641264
 const normalizePhone = (p) => {
@@ -107,6 +108,12 @@ async function processWhatsApp(msg) {
     // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
     logFailure({ phone: msg.from, name: msg.name, text: msg.text, error: err.message });
+    // קרדיט Anthropic נגמר — מתריעים למקס מיד (הוואטסאפ עדיין עובד בתרחיש הזה)
+    if (/credit balance is too low/i.test(err.message || "")) {
+      alertAdmin("anthropic_credit",
+        "🔴 הקרדיט של Anthropic נגמר — נועה לא עונה ללידים!
+טעינה: console.anthropic.com → Plans & Billing (ושווה להפעיל שם Auto-reload).", 6).catch(() => {});
+    }
     await sendText(
       msg.from,
       "היי 🙂 קיבלתי את ההודעה שלך ומשהו קטן השתבש לי בדרך. אשמח אם תוכל/י לכתוב שוב, או שפשוט אעביר אותך ליועצת שלנו שתחזור אליך. מה נוח לך?"

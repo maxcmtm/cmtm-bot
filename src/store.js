@@ -49,6 +49,16 @@ export function setGroqToken(t) {
   state.runtime.groqToken = t || "";
   save();
 }
+// זיכרון התראות מערכת (מניעת הצפה: התראה פעם ב-X שעות לכל תקלה)
+export function getLastAlert(key) {
+  return (state.runtime?.lastAlerts || {})[key] || 0;
+}
+export function setLastAlert(key) {
+  if (!state.runtime.lastAlerts) state.runtime.lastAlerts = {};
+  state.runtime.lastAlerts[key] = Date.now();
+  save();
+}
+
 // טלפון מנהלת המכירות להתראות ליד חם (וואטסאפ)
 export function getAlertPhone() {
   return state.runtime?.alertPhone || "";

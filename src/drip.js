@@ -189,6 +189,7 @@ export function startDripScheduler() {
     runDripCheck().catch((e) => console.error("[drip]", e.message));
     runNudgeCheck().catch((e) => console.error("[nudge]", e.message));
     sweepTwinLeads(3).catch((e) => console.error("[sweep]", e.message)); // ניקוי תאומי-זבל מה-CRM
+    import("./watchdog.js").then((w) => w.runWatchdog()).catch((e) => console.error("[watchdog]", e.message));
   }, everyMs);
   console.log(
     `⏰ מנוע חימום פעיל: בדיקה כל ${config.drip.checkMinutes} דק' · מרווח ${config.drip.stepDays} ימים בין הודעות`
