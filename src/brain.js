@@ -34,6 +34,19 @@ const PRICE_FALLBACK =
 const UNSUB_REPLY =
   "הסרנו אותך מרשימת התפוצה ולא יישלחו אליך עוד הודעות 🙂 אפשר תמיד לחזור ולכתוב לנו כאן.";
 
+// הודעת סיום קצרה ("תודה", "🙏", "סבבה") אחרי שנועה כבר נפרדה — לא עונים שוב.
+// חוסך קריאת מודל מלאה על כל "תודה", ומונע "בשמחה 🙂" שחוזר 3 פעמים.
+const ACK_RE = /^(תודה( רבה)?( רבה)?|תודה לך|תודה גדולה|סבבה|מעולה|מהמם|אחלה|יופי|ביי( ביי)?|לילה טוב|יום טוב|שבת שלום|בסדר|אוקיי?|אוקי|👍|🙏|❤️|💕|🙂|😊|❤)[\s!.🙏❤️💕👍🙂😊🌸🌺❣️]*$/;
+function isAckAfterClosing(text, history) {
+  const t = (text || "").trim();
+  if (!ACK_RE.test(t)) return false;
+  const lastBot = [...(history || [])].reverse().find((m) => m.role === "assistant");
+  if (!lastBot) return false;
+  const c = (lastBot.content || "").trim();
+  // התשובה הקודמת של נועה הייתה סיום קצר בלי שאלה פתוחה
+  return c.length <= 90 && !c.includes("?") && !c.startsWith("[");
+}
+
 // לולאת הודעות חוזרות (משיבונים אוטומטיים של עסקים): אותה הודעה שוב ושוב.
 // פעם שנייה — תשובה קצרה קבועה. פעם שלישית ומעלה — שתיקה (לא עונים בכלל).
 function repeatCount(text, history) {
@@ -92,6 +105,12 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude) 
       handoff_reason: "",
       _guardrail: "event_confirm",
     };
+  }
+
+  // גרדרייל 0.2: "תודה" אחרי פרידה — שקט (השיחה כבר הסתיימה יפה)
+  if (isAckAfterClosing(incoming, history)) {
+    return { reply: null, persona: lead.persona || "unknown", intent: "smalltalk",
+      score_delta: 0, handoff: false, handoff_reason: "", _guardrail: "ack_closing", _silent: true };
   }
 
   // גרדרייל 0.3: הודעה זהה שחוזרת (משיבון אוטומטי) — לא שורפים קריאות מודל על לולאה
