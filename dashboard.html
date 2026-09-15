@@ -352,8 +352,38 @@ function renderLead(l){
   box.innerHTML =
     (human ? `<div class="humanbar">🙋 השיחה בטיפול אנושי עד ${new Date(l.humanUntil).toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})} — נועה לא עונה אוטומטית. <a href="#" onclick="releaseLead();return false;">החזר לנועה</a></div>` : "")+
     `<textarea id="reply-text" placeholder="תשובה ידנית ללקוח (נשלחת מהמספר של נועה; אחרי שליחה נועה משתתקת ל-8 שעות)"></textarea>`+
-    `<div class="row"><button class="btn2" onclick="sendReply()">📤 שלח תשובה</button><span class="muted" id="reply-status"></span></div>`;
+    `<div class="row"><button class="btn2" onclick="sendReply()">📤 שלח תשובה</button><span class="muted" id="reply-status"></span></div>`+
+    `<details style="margin-top:6px"><summary style="cursor:pointer;font-size:13px">📋 שלח תבנית שירות (חשבונית, אישור, תזכורת...)</summary>
+       <div class="row" style="margin-top:6px"><select id="tpl-select" onchange="tplChanged()"><option value="">טוען תבניות...</option></select></div>
+       <div id="tpl-vars"></div><div id="tpl-preview" class="muted" style="font-size:12px;white-space:pre-wrap"></div>
+       <div class="row"><button class="btn2" onclick="sendTpl()">📨 שלח תבנית</button><span class="muted" id="tpl-status"></span></div></details>`;
   chat.parentNode.insertBefore(box, chat.nextSibling);
+  loadTemplates();
+}
+let TPLS=[];
+async function loadTemplates(){
+  const sel=document.getElementById("tpl-select"); if(!sel) return;
+  if(!TPLS.length){ try{ const r=await fetch("/admin/templates?secret="+encodeURIComponent(KEY)); TPLS=(await r.json()).templates||[]; }catch(e){} }
+  sel.innerHTML='<option value="">בחר תבנית...</option>'+TPLS.map(t=>`<option value="${t.name}">${t.name} (${t.vars} משתנים)</option>`).join("");
+}
+function tplChanged(){
+  const t=TPLS.find(x=>x.name===document.getElementById("tpl-select").value);
+  const v=document.getElementById("tpl-vars"), p=document.getElementById("tpl-preview");
+  if(!t){ v.innerHTML=""; p.textContent=""; return; }
+  v.innerHTML=Array.from({length:t.vars},(_,i)=>`<input class="tpl-var" placeholder="משתנה {{${i+1}}}" style="width:100%;margin:3px 0;padding:6px;border:1px solid #ccc;border-radius:8px">`).join("");
+  p.textContent=t.body;
+}
+async function sendTpl(){
+  const name=document.getElementById("tpl-select").value, stx=document.getElementById("tpl-status");
+  if(!name||!CUR_PHONE) return;
+  const params=[...document.querySelectorAll(".tpl-var")].map(i=>i.value.trim());
+  if(params.some(x=>!x)){ stx.textContent="מלא את כל המשתנים"; return; }
+  stx.textContent="שולח...";
+  try{
+    const r=await fetch("/admin/send-template",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({secret:KEY,phone:CUR_PHONE,template:name,params})});
+    const j=await r.json(); if(!r.ok) throw new Error(j.error||("שגיאה "+r.status));
+    stx.textContent="נשלח ✓"; openLead(CUR_PHONE);
+  }catch(e){ stx.textContent="❌ "+e.message; }
 }
 async function sendReply(){
   const ta=document.getElementById("reply-text"), stx=document.getElementById("reply-status");

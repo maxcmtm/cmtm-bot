@@ -329,6 +329,39 @@ const server = http.createServer(async (req, res) => {
   }
 
   // תיק ליד מלא (כולל כל השיחה) — לדאשבורד
+  // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  if (req.method === "GET" && path === "/admin/templates") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    try {
+      const r = await fetch(`https://graph.facebook.com/v21.0/${config.whatsapp.wabaId || "1237839791707675"}/message_templates?fields=name,status,category,components&limit=200`,
+        { headers: { authorization: `Bearer ${activeToken()}` } });
+      const data = (await r.json())?.data || [];
+      const out = data.filter((t) => t.status === "APPROVED" && t.category === "UTILITY" && !["hot_lead_alert", "system_alert"].includes(t.name))
+        .map((t) => { const body = (t.components || []).find((c) => c.type === "BODY")?.text || ""; return { name: t.name, body, vars: (body.match(/\{\{\d+\}\}/g) || []).length }; });
+      return send(res, 200, { templates: out });
+    } catch (e) { return send(res, 502, { error: e.message }); }
+  }
+
+  // שליחת תבנית שירות ללקוח/תלמיד — מהדאשבורד או מאוטומציה (Fireberry → Make → כאן)
+  // body: { secret, phone, template, params: ["רותי", "..."], name? }
+  if (req.method === "POST" && path === "/admin/send-template") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const phone = normalizePhone(body.phone);
+    const template = String(body.template || "").trim();
+    if (!phone || phone.length < 11 || phone.length > 13) return send(res, 400, { error: "phone לא תקין" });
+    if (!template) return send(res, 400, { error: "template חסר" });
+    const params = Array.isArray(body.params) ? body.params.map(String) : [];
+    const r = await sendTemplate(phone, template, params);
+    if (!r.ok && !r.dryRun) return send(res, 502, { error: `השליחה נכשלה (${r.status || "?"}) — בדוק שהתבנית מאושרת ומספר המשתנים נכון` });
+    const lead = getLead(phone, body.name || "");
+    if (studentStatus(phone) && lead.status !== "student") updateLead(phone, { status: "student" });
+    pushAssistantTurn(phone, `[נשלחה תבנית שירות ${template}${params.length ? ": " + params.join(" | ") : ""}]`);
+    console.log(`📨 תבנית שירות ${template} → ${phone}`);
+    return send(res, 200, { sent: true });
+  }
+
   // תשובה ידנית מהדאשבורד (אינבוקס המזכירות/נציגים). release=true מחזיר את השיחה לנועה.
   if (req.method === "POST" && path === "/admin/reply") {
     let body;
