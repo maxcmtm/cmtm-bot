@@ -40,6 +40,7 @@ import {
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { alertAdmin, runWatchdog } from "./watchdog.js";
+import { handleCrmEvent } from "./crm-events.js";
 
 // המרת טלפון לפורמט וואטסאפ בינלאומי: 0546641264 → 972546641264
 const normalizePhone = (p) => {
@@ -329,6 +330,24 @@ const server = http.createServer(async (req, res) => {
   }
 
   // תיק ליד מלא (כולל כל השיחה) — לדאשבורד
+  // אירוע מה-CRM (אוטומציית Fireberry → Make → כאן): {secret, event, accountId|phone, link?, doc?, ...}
+  // events: registered | registered_year2 | paid | invoice | document | certificate | books | course_update | class_reminder | service_open | followup
+  if (req.method === "POST" && path === "/crm-event") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret && url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    try {
+      const r = await handleCrmEvent(body);
+      if (r.ok) {
+        const lead = getLead(r.phone, r.ctx?.firstName || "");
+        if (lead.status !== "student") updateLead(r.phone, { status: "student" });
+        pushAssistantTurn(r.phone, `[נשלחה תבנית שירות ${r.template}: ${r.params.join(" | ")}]`);
+        console.log(`📨 אירוע CRM ${body.event} → ${r.template} → ${r.phone}`);
+      } else console.log(`⚠️ אירוע CRM ${body.event} לא נשלח: ${r.error}`);
+      return send(res, r.ok ? 200 : 422, r);
+    } catch (e) { return send(res, 500, { error: e.message }); }
+  }
+
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
   if (req.method === "GET" && path === "/admin/templates") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
