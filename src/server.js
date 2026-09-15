@@ -9,11 +9,12 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   getLastAlert,
   setLastAlert,
+  pushAssistantTurn,
   alreadyProcessed,
   getHistory,
   pushTurn,
@@ -105,11 +106,25 @@ async function processWhatsApp(msg) {
   const lead = getLead(msg.from, msg.name);
   const history = getHistory(msg.from); // ההיסטוריה לפני התור הנוכחי
   const studentCode = studentStatus(msg.from); // תלמיד/ה קיים/ת? → מצב שירות
+  // המזכירות/נציג ענו מהדאשבורד לאחרונה — השיחה אצל אדם, נועה לא מתערבת (רק מתריעה)
+  if (lead.humanUntil && lead.humanUntil > Date.now()) {
+    pushTurn(msg.from, msg.text, "[בטיפול אנושי — נועה לא ענתה]");
+    updateLead(msg.from, { lastInboundTs: Date.now() });
+    const key = `human_${msg.from}`;
+    if (Date.now() - getLastAlert(key) > 3600000) {
+      const to = (studentCode ? getServicePhone() : getAlertPhone()) || "972546641264";
+      sendTemplate(to, "hot_lead_alert", [`💬 ${msg.name || lead.name || "ליד"} ענה/תה`, waToIsraeli(msg.from), `בשיחה שבטיפולך: "${(msg.text || "").slice(0, 80)}"`])
+        .then((r) => { if (r.ok || r.dryRun) setLastAlert(key); }).catch(() => {});
+    }
+    console.log(`🙋 ${msg.from} בטיפול אנושי — הודעה נרשמה, אין מענה אוטומטי`);
+    return;
+  }
   let decision;
   try {
     // למודל נשלחות רק 16 ההודעות האחרונות; ההיסטוריה המלאה נשמרת לתצוגה
+    const studentInfo = studentCode ? await getStudentInfo(msg.from).catch(() => "") : "";
     decision = await handleMessage(lead, history.slice(-16), msg.text, undefined,
-      studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה" } : {});
+      studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה", studentInfo } : {});
   } catch (err) {
     // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
@@ -314,6 +329,27 @@ const server = http.createServer(async (req, res) => {
   }
 
   // תיק ליד מלא (כולל כל השיחה) — לדאשבורד
+  // תשובה ידנית מהדאשבורד (אינבוקס המזכירות/נציגים). release=true מחזיר את השיחה לנועה.
+  if (req.method === "POST" && path === "/admin/reply") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const phone = normalizePhone(body.phone);
+    if (!phone) return send(res, 400, { error: "phone חסר" });
+    if (body.release) {
+      updateLead(phone, { humanUntil: 0 });
+      pushAssistantTurn(phone, "[השיחה הוחזרה לנועה]");
+      return send(res, 200, { released: true });
+    }
+    const text = String(body.text || "").trim();
+    if (!text) return send(res, 400, { error: "text חסר" });
+    const r = await sendText(phone, text);
+    if (!r.ok && !r.dryRun) return send(res, 502, { error: "השליחה נכשלה — יתכן שעברו 24 שעות מההודעה האחרונה של הלקוח (מגבלת וואטסאפ)" });
+    pushAssistantTurn(phone, `[מזכירות] ${text}`);
+    updateLead(phone, { humanUntil: Date.now() + 8 * 3600000, nudgedTs: Date.now() });
+    return send(res, 200, { sent: true, humanUntil: Date.now() + 8 * 3600000 });
+  }
+
   if (req.method === "GET" && path === "/admin/lead") {
     if (url.searchParams.get("secret") !== config.webhookSecret) {
       return send(res, 401, { error: "unauthorized" });
@@ -335,6 +371,8 @@ const server = http.createServer(async (req, res) => {
       createdTs: l.createdTs || 0,
       lastInboundTs: l.lastInboundTs || 0,
       lastDripTs: l.lastDripTs || 0,
+      humanUntil: l.humanUntil || 0,
+      isStudent: !!studentStatus(l.id),
       history: l.history || [],
     });
   }

@@ -61,6 +61,12 @@
   .bub.b{background:#DCF6E8;margin-right:auto;border-radius:12px 12px 3px 12px}
   .sysnote{text-align:center;color:#98a0a8;font-size:11.5px;margin:8px 0;font-style:italic}
   .btn2{background:#fff;color:var(--green);border:1px solid var(--green);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12.5px}
+.bub.h{background:#fff3c9;border:1px solid #f0d98a}
+.bub.h::before{content:"מזכירות · ";font-weight:700;font-size:11px;color:#8a6d00}
+.replybox{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.replybox textarea{width:100%;min-height:64px;border:1px solid #ccc;border-radius:10px;padding:8px;font:inherit;resize:vertical}
+.replybox .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.humanbar{background:#fff3c9;border:1px solid #f0d98a;border-radius:8px;padding:6px 10px;font-size:12.5px}
 </style>
 </head>
 <body>
@@ -307,6 +313,7 @@ async function openLead(phone){
   document.getElementById("ld-meta").textContent = phone;
   document.getElementById("ld-insight").innerHTML = "";
   document.getElementById("ld-chat").innerHTML = "";
+  document.querySelectorAll(".replybox").forEach(e=>e.remove());
   try{
     const r = await fetch("/admin/lead?secret="+encodeURIComponent(KEY)+"&phone="+encodeURIComponent(phone));
     if(!r.ok) throw new Error("שגיאה "+r.status);
@@ -330,12 +337,39 @@ function renderLead(l){
   } else {
     chat.innerHTML = l.history.map(t=>{
       const txt = t.content || "";
+      if(t.role==="assistant" && txt.startsWith("[מזכירות] "))
+        return `<div class="bub b h">${esc(txt.slice(10))}</div>`;
       if(t.role==="assistant" && txt.startsWith("[") && txt.endsWith("]"))
         return `<div class="sysnote">${esc(txt.slice(1,-1))}</div>`;
       return `<div class="bub ${t.role==="user"?"u":"b"}">${esc(txt)}</div>`;
     }).join("");
     chat.scrollTop = chat.scrollHeight;
   }
+  // תיבת תשובה ידנית (אינבוקס) + מצב השתלטות אנושית
+  const human = l.humanUntil && l.humanUntil > Date.now();
+  const box = document.createElement("div");
+  box.className = "replybox";
+  box.innerHTML =
+    (human ? `<div class="humanbar">🙋 השיחה בטיפול אנושי עד ${new Date(l.humanUntil).toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"})} — נועה לא עונה אוטומטית. <a href="#" onclick="releaseLead();return false;">החזר לנועה</a></div>` : "")+
+    `<textarea id="reply-text" placeholder="תשובה ידנית ללקוח (נשלחת מהמספר של נועה; אחרי שליחה נועה משתתקת ל-8 שעות)"></textarea>`+
+    `<div class="row"><button class="btn2" onclick="sendReply()">📤 שלח תשובה</button><span class="muted" id="reply-status"></span></div>`;
+  chat.parentNode.insertBefore(box, chat.nextSibling);
+}
+async function sendReply(){
+  const ta=document.getElementById("reply-text"), stx=document.getElementById("reply-status");
+  const text=(ta.value||"").trim(); if(!text||!CUR_PHONE) return;
+  stx.textContent="שולח...";
+  try{
+    const r=await fetch("/admin/reply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({secret:KEY,phone:CUR_PHONE,text})});
+    const j=await r.json();
+    if(!r.ok) throw new Error(j.error||("שגיאה "+r.status));
+    ta.value=""; stx.textContent="נשלח ✓"; openLead(CUR_PHONE);
+  }catch(e){ stx.textContent="❌ "+e.message; }
+}
+async function releaseLead(){
+  if(!CUR_PHONE) return;
+  await fetch("/admin/reply",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({secret:KEY,phone:CUR_PHONE,release:true})});
+  openLead(CUR_PHONE);
 }
 async function genSummary(){
   if(!CUR_PHONE) return;

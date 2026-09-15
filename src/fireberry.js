@@ -272,6 +272,51 @@ export function studentStatus(phone) {
 }
 export function studentSetSize() { return studentCache.map.size; }
 
+// נתוני התלמיד לנועה (מצב שירות): הרשמות לקורס (33) + פרטי המחזור (1000). מטמון 6 שעות.
+const studentInfoCache = new Map(); // phone -> { at, text }
+const fmtDate = (iso) => { if (!iso) return ""; const [y, m, d] = String(iso).slice(0, 10).split("-"); return `${d}.${m}.${y}`; };
+const fmtMoney = (n) => (n == null ? "" : Number(n).toLocaleString("he-IL") + " ₪");
+async function fbQuery(body) {
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`${BASE}/api/query`, {
+      method: "POST", headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 429) { await sleep(15000); continue; }
+    if (!r.ok) return [];
+    return (await r.json())?.data?.Data || [];
+  }
+  return [];
+}
+export async function getStudentInfo(phone) {
+  const c = studentInfoCache.get(phone);
+  if (c && Date.now() - c.at < 6 * 3600000) return c.text;
+  let text = "";
+  try {
+    const accId = await findAccountByPhone(phone);
+    if (accId) {
+      const regs = await fbQuery({ objecttype: 33, page_size: 5,
+        fields: "pcfsystemfield251,pcfsystemfield53,pcfsystemfield244,pcfsystemfield129",
+        query: `(accountid = '${accId}')` });
+      const lines = [];
+      for (const reg of regs.slice(0, 3)) {
+        let cyc = "";
+        if (reg.pcfsystemfield53) {
+          const r = await fetch(`${BASE}/api/record/1000/${reg.pcfsystemfield53}`, { headers: { tokenid: token(), accept: "application/json" } });
+          if (r.ok) {
+            const rec = (await r.json())?.data?.Record || {};
+            cyc = `מחזור: ${rec.name || ""}` + (rec.pcfsystemfield33 ? ` | תאריך פתיחה: ${fmtDate(rec.pcfsystemfield33)}` : "") + (rec.pcfsystemfield88 ? ` | ${rec.pcfsystemfield88} מפגשים` : "");
+          }
+        }
+        lines.push(`• ${reg.pcfsystemfield251 || "קורס"} (נרשם/ה ${fmtDate(reg.pcfsystemfield129)})` + (cyc ? ` — ${cyc}` : "") + (reg.pcfsystemfield244 != null ? ` | שולם עד כה: ${fmtMoney(reg.pcfsystemfield244)}` : ""));
+      }
+      if (lines.length) text = "הרשמות התלמיד/ה במערכת:\n" + lines.join("\n");
+    }
+  } catch (e) { console.error("[fireberry] getStudentInfo:", e.message); }
+  studentInfoCache.set(phone, { at: Date.now(), text });
+  return text;
+}
+
 // סימון ליד חם בכרטיס התלמיד: דירוג (accountratingcode) = 6.
 // משמש את מנהלת המכירות לתצוגת "לידים חמים" ב-Fireberry.
 export async function markHotLead(accountId) {
