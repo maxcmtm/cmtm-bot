@@ -231,6 +231,47 @@ export async function updateLead() {
   return { dryRun: true };
 }
 
+// ===== תלמידים קיימים (מצב שירות) =====
+// סטטוסים שמסמנים תלמיד/נרשם: 22 פעיל, 18 בתהליך רישום, 24 הרשמה עתידית, 25 מחודש.
+// הרשימה נטענת מה-CRM כל כמה שעות ונשמרת בזיכרון: טלפון (972...) -> סטטוס.
+const STUDENT_STATUSES = [22, 18, 24, 25];
+export const STUDENT_STATUS_NAMES = { 22: "תלמיד/ה פעיל/ה", 18: "בתהליך רישום", 24: "הרשמה עתידית", 25: "תלמיד/ה מחודש/ת" };
+let studentCache = { at: 0, map: new Map() };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const toIntl = (p) => { p = String(p || "").replace(/\D/g, ""); return p.startsWith("0") ? "972" + p.slice(1) : p; };
+
+export async function refreshStudentSet() {
+  if (!token()) return studentCache.map;
+  const map = new Map();
+  for (const st of STUDENT_STATUSES) {
+    let page = 1;
+    while (page < 40) {
+      let r;
+      try {
+        r = await fetch(`${BASE}/api/query`, {
+          method: "POST",
+          headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+          body: JSON.stringify({ objecttype: 1, page_size: 500, page_number: page, fields: "telephone1", query: `(statuscode = ${st})` }),
+        });
+      } catch { await sleep(5000); continue; }
+      if (r.status === 429) { await sleep(30000); continue; }
+      if (!r.ok) break;
+      const recs = (await r.json())?.data?.Data || [];
+      for (const rec of recs) { const p = toIntl(rec.telephone1); if (p.length >= 11 && !map.has(p)) map.set(p, st); }
+      if (recs.length < 500) break;
+      page++; await sleep(1500);
+    }
+    await sleep(1500);
+  }
+  if (map.size) { studentCache = { at: Date.now(), map }; console.log(`🎓 רשימת תלמידים קיימים עודכנה: ${map.size}`); }
+  return studentCache.map;
+}
+// 0 = לא תלמיד; אחרת קוד הסטטוס ב-CRM
+export function studentStatus(phone) {
+  return studentCache.map.get(toIntl(phone)) || 0;
+}
+export function studentSetSize() { return studentCache.map.size; }
+
 // סימון ליד חם בכרטיס התלמיד: דירוג (accountratingcode) = 6.
 // משמש את מנהלת המכירות לתצוגת "לידים חמים" ב-Fireberry.
 export async function markHotLead(accountId) {

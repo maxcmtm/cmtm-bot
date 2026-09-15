@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   getLastAlert,
@@ -34,6 +34,8 @@ import {
   latestReport,
   getAlertPhone,
   setAlertPhone,
+  getServicePhone,
+  setServicePhone,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { alertAdmin, runWatchdog } from "./watchdog.js";
@@ -102,10 +104,12 @@ async function processWhatsApp(msg) {
   sendTypingIndicator(msg.id); // "מקליד..." בזמן שנועה חושבת
   const lead = getLead(msg.from, msg.name);
   const history = getHistory(msg.from); // ההיסטוריה לפני התור הנוכחי
+  const studentCode = studentStatus(msg.from); // תלמיד/ה קיים/ת? → מצב שירות
   let decision;
   try {
     // למודל נשלחות רק 16 ההודעות האחרונות; ההיסטוריה המלאה נשמרת לתצוגה
-    decision = await handleMessage(lead, history.slice(-16), msg.text);
+    decision = await handleMessage(lead, history.slice(-16), msg.text, undefined,
+      studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה" } : {});
   } catch (err) {
     // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
@@ -140,9 +144,19 @@ async function processWhatsApp(msg) {
   const l = updateLead(msg.from, updFields);
   let status = "active_chat";
   if (decision.intent === "unsubscribe") status = "unsubscribed";
+  else if (studentCode) status = "student"; // תלמיד קיים — לא ליד חם ולא בחימום
   else if (decision.handoff || l.score >= 70) status = "hot";
   updateLead(msg.from, { status });
   const becameHot = status === "hot" && !wasHot;
+  // פניית שירות של תלמיד שדורשת אדם — התראה למזכירות (או למקס עד שיוגדר מספר שירות)
+  if (studentCode && decision.handoff) {
+    const to = getServicePhone() || "972546641264";
+    sendTemplate(to, "hot_lead_alert", [
+      `🎓 שירות: ${msg.name || l.name || "תלמיד/ה"}`,
+      waToIsraeli(msg.from),
+      (decision.handoff_reason || "פניית שירות של תלמיד/ה").slice(0, 120),
+    ]).catch(() => {});
+  }
   // התראת וואטסאפ למנהלת המכירות ברגע שליד נהיה חם (תבנית hot_lead_alert)
   if (becameHot && getAlertPhone()) {
     sendTemplate(getAlertPhone(), "hot_lead_alert", [
@@ -183,14 +197,15 @@ async function processWhatsApp(msg) {
   }
   // שמירת השיחה ב-Fireberry (אחרי שהתשובה כבר נשלחה ללקוח)
   await (async () => {
-    const wantsContact =
-      decision.handoff || ["buying_signal", "request_human"].includes(decision.intent);
+    // תלמיד קיים: לא יוצרים כרטיס, לא "פנייה חוזרת", לא דירוג ליד חם
+    const wantsContact = !studentCode &&
+      (decision.handoff || ["buying_signal", "request_human"].includes(decision.intent));
     let accId = l.fireberryId;
     let created = false;
     if (!accId) {
       accId = await findAccountByPhone(msg.from);
       // ליד וואטסאפ ישיר בלי כרטיס שנהיה רלוונטי — פותחים לו כרטיס (נכנס לתור הנציגים)
-      if (!accId && (wantsContact || l.status === "hot")) {
+      if (!accId && !studentCode && (wantsContact || l.status === "hot")) {
         accId = await createAccount(msg.name, msg.from);
         created = true;
       }
@@ -202,7 +217,7 @@ async function processWhatsApp(msg) {
       if (rid && rid !== l.fireberrySummaryId) updateLead(msg.from, { fireberrySummaryId: rid });
     }
     // ליד שנהיה חם — מסמנים דירוג "ליד חם" בכרטיס (לתצוגת מנהלת המכירות)
-    if (accId && l.status === "hot") await markHotLead(accId);
+    if (accId && l.status === "hot" && !studentCode) await markHotLead(accId);
     // "פנייה חוזרת" לנציגים — רק כשהליד באמת רוצה שידברו איתו (כרטיס חדש כבר נולד בסטטוס הזה)
     if (accId && wantsContact && !created) await touchReturningLead(accId);
     // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
@@ -289,6 +304,7 @@ const server = http.createServer(async (req, res) => {
       tokenValid,
       tokenErr,
       numberQuality: quality,
+      studentSet: studentSetSize(),
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
       paused: isPaused(),
@@ -353,7 +369,7 @@ const server = http.createServer(async (req, res) => {
     try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
     if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
     const phone = normalizePhone(body.phone);
-    const ok = ["in_sequence","active_chat","hot","cold","unsubscribed"].includes(body.status);
+    const ok = ["in_sequence","active_chat","hot","cold","unsubscribed","student"].includes(body.status);
     if (!ok) return send(res, 400, { error: "סטטוס לא חוקי" });
     const l = allLeads().find((x) => x.id === phone);
     if (!l) return send(res, 404, { error: "ליד לא נמצא" });
@@ -440,6 +456,10 @@ const server = http.createServer(async (req, res) => {
     if (body.alertPhone) {
       setAlertPhone(normalizePhone(body.alertPhone));
       updated.push("alertPhone");
+    }
+    if (body.servicePhone) {
+      setServicePhone(normalizePhone(body.servicePhone));
+      updated.push("servicePhone");
     }
     if (body.groqToken && body.groqToken.length >= 10) {
       setGroqToken(body.groqToken);

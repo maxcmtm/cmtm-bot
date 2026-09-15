@@ -59,6 +59,15 @@ export function setLastAlert(key) {
   save();
 }
 
+// טלפון המזכירות/שירות להסלמות של תלמידים קיימים
+export function getServicePhone() {
+  return state.runtime?.servicePhone || "";
+}
+export function setServicePhone(p) {
+  state.runtime.servicePhone = p || "";
+  save();
+}
+
 // טלפון מנהלת המכירות להתראות ליד חם (וואטסאפ)
 export function getAlertPhone() {
   return state.runtime?.alertPhone || "";

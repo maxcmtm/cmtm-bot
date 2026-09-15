@@ -93,7 +93,7 @@ function humanizeDashes(text) {
   return text;
 }
 
-export async function handleMessage(lead, history, incoming, askFn = askClaude) {
+export async function handleMessage(lead, history, incoming, askFn = askClaude, opts = {}) {
   // גרדרייל 0: אישור הגעה לאירוע — תשובה קבועה, בלי מודל ובלי שום כתיבה ל-CRM
   if (isAttendanceConfirm(incoming)) {
     return {
@@ -154,9 +154,9 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude) 
   }
 
   // בניית רשימת ההודעות למודל. שורת הקשר ראשונה עם פרטי הליד.
-  const context = `פרטי הליד: שם=${lead.name || "לא ידוע"}, פרסונה=${
-    lead.persona || "unknown"
-  }, ציון חום=${lead.score ?? 0}.`;
+  const context = opts.student
+    ? `⚠️ זהו/זוהי תלמיד/ה קיים/ת של המכללה (סטטוס ב-CRM: ${opts.student}). מצב שירות: ענה/י לפי הסעיף "מצב שירות לתלמידים קיימים". בלי שיווק, בלי שיעור מבוא, בלי שיחת התאמה. שם=${lead.name || "לא ידוע"}.`
+    : `פרטי הליד: שם=${lead.name || "לא ידוע"}, פרסונה=${lead.persona || "unknown"}, ציון חום=${lead.score ?? 0}.`;
 
   const messages = [];
   if (history && history.length) {

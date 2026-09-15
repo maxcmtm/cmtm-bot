@@ -2,7 +2,7 @@
 import { config } from "./config.js";
 import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
 import { sendTemplate, sendText, getNumberQuality } from "./whatsapp.js";
-import { sweepTwinLeads } from "./fireberry.js";
+import { sweepTwinLeads, refreshStudentSet, studentStatus } from "./fireberry.js";
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
 const STEP_CONTEXT = [
@@ -77,6 +77,7 @@ export async function startSequence(lead) {
   }
   if (lead.seqStep >= 0) return; // כבר התחיל
   if (lead.status === "unsubscribed") return; // ביקש שלא נפנה אליו
+  if (studentStatus(lead.id)) { updateLead(lead.id, { status: "student" }); return; } // תלמיד קיים — אין שיווק
   if (isQuietHours()) {
     console.log(`🌙 שעות שקט — הודעת הפתיחה ל-${lead.name || lead.id} תישלח בבוקר`);
     return; // runDripCheck ישלים בבוקר (seqStep נשאר -1)
@@ -119,9 +120,10 @@ export async function runDripCheck() {
   const budget = Math.min(config.drip.runCap, Math.max(0, dailyCap - sentToday));
 
   const due = [];
-  let pruned = 0;
+  let pruned = 0, students = 0;
   for (const lead of allLeads()) {
     if (lead.status !== "in_sequence") continue; // active_chat/hot/unsubscribed/cold לא מקבלים
+    if (studentStatus(lead.id)) { updateLead(lead.id, { status: "student" }); students++; continue; } // נרשם בינתיים — עוצרים שיווק
     if (lead.seqStep < 0) { due.push({ lead, step: 0 }); continue; } // פתיחה שהוחמצה (נכנס בשבת)
     if (lead.seqStep >= SEQUENCE.length - 1) continue; // סיים רצף
     if (now - lead.lastDripTs < stepMs) continue; // עוד לא עברו X ימים
@@ -142,6 +144,7 @@ export async function runDripCheck() {
     sent++;
     await new Promise((r) => setTimeout(r, 3000)); // ריווח בין שליחות
   }
+  if (students) console.log(`🎓 ${students} לידים זוהו כתלמידים קיימים — הוצאו מהחימום`);
   if (pruned) console.log(`✂️ הרצף נעצר ל-${pruned} לידים שקטים (לא ענו עד שלב ${config.drip.maxSilentStep})`);
   if (due.length > sent) console.log(`⏳ תקרת קצב: ${due.length - sent} בשלים ימתינו לסבב הבא (נשלחו היום ${sentToday + sent}/${dailyCap}, דירוג ${quality})`);
   if (sent) console.log(`🔥 מנוע חימום: נשלחו ${sent} הודעות`);
@@ -185,6 +188,9 @@ export function startDripScheduler() {
     return;
   }
   const everyMs = config.drip.checkMinutes * 60 * 1000;
+  // רשימת התלמידים: טעינה בעלייה ורענון כל 6 שעות
+  setTimeout(() => refreshStudentSet().catch((e) => console.error("[students]", e.message)), 8000);
+  setInterval(() => refreshStudentSet().catch((e) => console.error("[students]", e.message)), 6 * 3600000);
   timer = setInterval(() => {
     runDripCheck().catch((e) => console.error("[drip]", e.message));
     runNudgeCheck().catch((e) => console.error("[nudge]", e.message));
