@@ -348,6 +348,22 @@ const server = http.createServer(async (req, res) => {
     } catch (e) { return send(res, 500, { error: e.message }); }
   }
 
+  // הודעת טקסט חופשית מאוטומציה (תחליף למודול "message" של Funner; עובד רק בחלון 24ש של וואטסאפ)
+  if (req.method === "POST" && path === "/admin/send-text") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const phone = normalizePhone(body.phone);
+    const text = String(body.text || "").trim();
+    if (!phone || phone.length < 11 || phone.length > 13) return send(res, 400, { error: "phone לא תקין" });
+    if (!text) return send(res, 400, { error: "text חסר" });
+    const r = await sendText(phone, text);
+    if (!r.ok && !r.dryRun) return send(res, 502, { error: "השליחה נכשלה — יתכן שעברו 24 שעות מההודעה האחרונה של הלקוח" });
+    getLead(phone, body.name || "");
+    pushAssistantTurn(phone, `[מזכירות] ${text}`);
+    return send(res, 200, { sent: true });
+  }
+
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
   if (req.method === "GET" && path === "/admin/templates") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
