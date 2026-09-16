@@ -118,6 +118,10 @@
     <tbody id="rows"></tbody>
   </table>
 </div>
+<div id="sends-panel" style="margin:12px 0;padding:10px 14px;border:1px solid #d5e8df;border-radius:12px;background:#f7fbf9">
+  <b>📨 שליחות שירות אחרונות (חשבוניות, ברוכים הבאים, תקנון)</b> <span class="muted" id="sends-summary"></span>
+  <div id="sends-list" style="font-size:12.5px;max-height:180px;overflow:auto;margin-top:6px"></div>
+</div>
 <div class="modal-bg" id="modal" onclick="if(event.target===this)closeLead()">
   <div class="lead-card">
     <div class="lead-head">
@@ -174,6 +178,7 @@ async function load(){
     localStorage.setItem("cmtm_key", KEY);
     const j = await r.json();
     NOW = j.now; DATA = j.leads;
+    try{ renderSends(j.sends); }catch(e){}
     DATA.forEach(l=> l.lastTs = Math.max(l.lastInboundTs||0, l.lastDripTs||0, l.createdTs||0));
     const fails=(j.failures||[]).filter(f=>NOW-f.ts<48*3600000);
     if(fails.length){
@@ -415,6 +420,15 @@ async function genSummary(){
 }
 load().then(()=>{ const p=new URLSearchParams(location.search).get("lead"); if(p) openLead(p); });
 setInterval(load, 30000);
+
+function renderSends(sends){
+  const box=document.getElementById("sends-list"), sum=document.getElementById("sends-summary");
+  if(!box) return;
+  const s=(sends||[]).slice().reverse();
+  const day=Date.now()-86400000, today=s.filter(x=>x.ts>day);
+  sum.textContent=` · ב-24 שעות: ${today.length} (נכשלו ${today.filter(x=>!x.ok).length})`;
+  box.innerHTML=s.slice(0,40).map(x=>`<div>${x.ok?"✅":"❌"} ${new Date(x.ts).toLocaleString("he-IL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})} · <b>${esc(x.template||x.event||x.kind)}</b> → ${esc(x.name||"")} ${esc(x.phone||"")}${x.error?" · "+esc(x.error):""}</div>`).join("")||'<span class="muted">עדיין אין שליחות</span>';
+}
 </script>
 </body>
 </html>

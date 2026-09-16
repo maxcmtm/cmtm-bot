@@ -37,6 +37,8 @@ import {
   setAlertPhone,
   getServicePhone,
   setServicePhone,
+  logSend,
+  getSends,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { alertAdmin, runWatchdog } from "./watchdog.js";
@@ -287,6 +289,7 @@ const server = http.createServer(async (req, res) => {
       lastDripTs: l.lastDripTs || 0,
     }));
     return send(res, 200, {
+      sends: getSends().slice(-200),
       now: Date.now(),
       dripEnabled: config.drip.enabled,
       paused: isPaused(),
@@ -338,6 +341,7 @@ const server = http.createServer(async (req, res) => {
     if (body.secret !== config.webhookSecret && url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
     try {
       const r = await handleCrmEvent(body);
+      logSend({ kind: "crm-event", event: body.event, template: r.template || "", phone: r.phone || body.phone || "", ok: !!r.ok, error: r.error || "" });
       if (r.ok) {
         const lead = getLead(r.phone, r.ctx?.firstName || "");
         if (lead.status !== "student") updateLead(r.phone, { status: "student" });
@@ -358,6 +362,7 @@ const server = http.createServer(async (req, res) => {
     if (!phone || phone.length < 11 || phone.length > 13) return send(res, 400, { error: "phone לא תקין" });
     if (!text) return send(res, 400, { error: "text חסר" });
     const r = await sendText(phone, text);
+    logSend({ kind: "text", phone, name: body.name || "", ok: !!(r.ok || r.dryRun), status: r.status || 200, preview: text.slice(0, 60) });
     if (!r.ok && !r.dryRun) return send(res, 502, { error: "השליחה נכשלה — יתכן שעברו 24 שעות מההודעה האחרונה של הלקוח" });
     getLead(phone, body.name || "");
     pushAssistantTurn(phone, `[מזכירות] ${text}`);
@@ -389,6 +394,7 @@ const server = http.createServer(async (req, res) => {
     if (!template) return send(res, 400, { error: "template חסר" });
     const params = Array.isArray(body.params) ? body.params.map(String) : [];
     const r = await sendTemplate(phone, template, params);
+    logSend({ kind: "template", template, phone, name: body.name || "", ok: !!(r.ok || r.dryRun), status: r.status || 200, source: body.source || "automation" });
     if (!r.ok && !r.dryRun) return send(res, 502, { error: `השליחה נכשלה (${r.status || "?"}) — בדוק שהתבנית מאושרת ומספר המשתנים נכון` });
     const lead = getLead(phone, body.name || "");
     if (studentStatus(phone) && lead.status !== "student") updateLead(phone, { status: "student" });

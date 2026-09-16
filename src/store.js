@@ -59,6 +59,15 @@ export function setLastAlert(key) {
   save();
 }
 
+// יומן שליחות שירות (תבניות/טקסט מאוטומציות ומהדאשבורד) — 500 אחרונות
+export function logSend(entry) {
+  if (!state.sends) state.sends = [];
+  state.sends.push({ ts: Date.now(), ...entry });
+  if (state.sends.length > 500) state.sends = state.sends.slice(-500);
+  save();
+}
+export function getSends() { return state.sends || []; }
+
 // טלפון המזכירות/שירות להסלמות של תלמידים קיימים
 export function getServicePhone() {
   return state.runtime?.servicePhone || "";
