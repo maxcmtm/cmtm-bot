@@ -60,7 +60,7 @@ console.log("גרדריילים דטרמיניסטיים:");
   const r = await handleMessage(lead, [], "הסר", ask);
   check("הסרה מזוהה כ-unsubscribe", r.intent === "unsubscribe");
   check("הסרה לא מעבירה לנציג", r.handoff === false);
-  check("הסרה לא קוראת למודל (תשובה קבועה)", r.reply.includes("הוסרת"));
+  check("הסרה לא קוראת למודל (תשובה קבועה)", r._guardrail === "unsubscribe" && /הסרנו|הוסרת/.test(r.reply));
 }
 {
   const r = await handleMessage(lead, [], "כמה עולה שנה א'?", ask);

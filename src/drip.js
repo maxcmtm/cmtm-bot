@@ -53,15 +53,23 @@ export function isQuietHours(d = null) {
 
 // שולח שלב בודד לליד ומעדכן את מצבו
 async function sendStep(lead, step) {
+  // בדיקה חוזרת ברגע השליחה (ולא רק בבניית רשימת הבשלים): סבב שליחה נמשך דקות,
+  // ובינתיים הליד יכול לבקש הסרה, להיכנס לשיחה, להפוך לחם או להירשם כתלמיד.
+  if (lead.status !== "in_sequence") {
+    console.log(`⏭️ דילוג על חימום שלב ${step} ל-${lead.name || lead.id}: הסטטוס השתנה ל-${lead.status}`);
+    return;
+  }
   const tmpl = SEQUENCE[step];
   const res = await sendTemplate(lead.id, tmpl, [firstName(lead.name)]);
   if (res.ok || res.dryRun) {
     const last = step >= SEQUENCE.length - 1;
     pushAssistantTurn(lead.id, STEP_CONTEXT[step]); // שמירת ההקשר לרצף השיחה
+    // לא דורסים סטטוס שהשתנה בזמן השליחה עצמה (למשל "הסר" שהגיע באותן שניות)
+    const stillInSeq = lead.status === "in_sequence";
     updateLead(lead.id, {
       seqStep: step,
       lastDripTs: Date.now(),
-      status: last ? "cold" : "in_sequence",
+      ...(stillInSeq ? { status: last ? "cold" : "in_sequence" } : {}),
     });
     console.log(`📤 חימום שלב ${step} (${tmpl}) → ${lead.name || lead.id}${last ? " [רצף הסתיים]" : ""}`);
   } else {
