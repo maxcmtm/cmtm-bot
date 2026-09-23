@@ -39,8 +39,10 @@ import {
   setServicePhone,
   logSend,
   getSends,
+  setAutomationOverride,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
+import { matchAutomation, automationStatus } from "./automation-skip.js";
 import { alertAdmin, runWatchdog } from "./watchdog.js";
 import { handleCrmEvent } from "./crm-events.js";
 
@@ -120,6 +122,27 @@ async function processWhatsApp(msg) {
         .then((r) => { if (r.ok || r.dryRun) setLastAlert(key); }).catch(() => {});
     }
     console.log(`🙋 ${msg.from} בטיפול אנושי — הודעה נרשמה, אין מענה אוטומטי`);
+    return;
+  }
+  // אוטומציה של n8n עונה על ההודעה הזו (אישור לימודים, הסרה, "מעוניין"...) — נועה שותקת
+  // כדי שהלקוח לא יקבל שתי תשובות. המצב הפנימי עדיין מתעדכן (הסרה עוצרת את החימום לתמיד).
+  const auto = matchAutomation(msg.text, history);
+  if (auto) {
+    pushTurn(msg.from, msg.text, `[ענתה אוטומציית "${auto.label}" — נועה שתקה]`);
+    const isUnsub = auto.group === "unsubscribe";
+    updateLead(msg.from, {
+      lastInboundTs: Date.now(),
+      lastIntent: isUnsub ? "unsubscribe" : lead.lastIntent || "",
+      status: isUnsub ? "unsubscribed" : lead.status === "in_sequence" ? "active_chat" : lead.status,
+    });
+    console.log(`🤖 ${msg.name || msg.from}: "${msg.text}" → אוטומציית ${auto.label} (${auto.phrase}) — אין מענה מנועה`);
+    if (isUnsub) {
+      // גיבוי לאוטומציה: מסמנים "הוסר מרשימת דיוור" גם מכאן (כתיבה כפולה של אותו ערך לא מזיקה)
+      (async () => {
+        const accId = lead.fireberryId || (await findAccountByPhone(msg.from));
+        if (accId) await markOptedOut(accId);
+      })().catch((e) => console.error("[fireberry] optout:", e.message));
+    }
     return;
   }
   let decision;
@@ -370,6 +393,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // מצב אוטומציות n8n שנועה מדלגת עליהן: GET = רשימה, POST {group, active} = הדלקה/כיבוי בזמן ריצה
+  if (path === "/admin/automation" && (req.method === "GET" || req.method === "POST")) {
+    let body = {};
+    if (req.method === "POST") { try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "bad json" }); } }
+    const secret = req.method === "GET" ? url.searchParams.get("secret") : body.secret;
+    if (secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    if (req.method === "POST") {
+      if (!body.group || !automationStatus().some((g) => g.key === body.group)) return send(res, 400, { error: "unknown group" });
+      setAutomationOverride(body.group, body.active === null || body.active === undefined ? null : !!body.active);
+      console.log(`⚙️ אוטומציה ${body.group} → ${body.active}`);
+    }
+    return send(res, 200, { groups: automationStatus() });
+  }
+
   if (req.method === "GET" && path === "/admin/templates") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
     try {

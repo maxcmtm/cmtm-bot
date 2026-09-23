@@ -4,6 +4,7 @@
 import { config } from "../src/config.js";
 import { handleMessage } from "../src/brain.js";
 import { askClaude } from "../src/claude.js";
+import { matchAutomation } from "../src/automation-skip.js";
 
 const live = Boolean(config.anthropicKey);
 let pass = 0,
@@ -61,6 +62,34 @@ console.log("גרדריילים דטרמיניסטיים:");
   check("הסרה מזוהה כ-unsubscribe", r.intent === "unsubscribe");
   check("הסרה לא מעבירה לנציג", r.handoff === false);
   check("הסרה לא קוראת למודל (תשובה קבועה)", r._guardrail === "unsubscribe" && /הסרנו|הוסרת/.test(r.reply));
+}
+{
+  // זיהוי הסרה = מילה שלמה בלבד ("הסרטון" הוריד אדם מרשימת הדיוור בטעות)
+  const yes = ["הסר", "הסר בבקשה!", "תסירו אותי מהרשימה", "אני לא מעוניינת", "תפסיקו לשלוח לי", "STOP"];
+  const no = ["הסרטון לא נפתח לי", "איפה הסרט על השיטה?", "מעוניינת בפרטים", "ההסרה של הכאב הייתה מדהימה"];
+  const all = [];
+  for (const t of yes) all.push((await handleMessage(lead, [], t, ask)).intent === "unsubscribe" ? "" : `"${t}" לא זוהה`);
+  for (const t of no) all.push((await handleMessage(lead, [], t, ask)).intent !== "unsubscribe" ? "" : `"${t}" זוהה בטעות`);
+  const bad = all.filter(Boolean);
+  check("הסרה: מילה שלמה בלבד (הסרטון ≠ הסר)", bad.length === 0, bad.join(", "));
+}
+{
+  // דילוג על הודעות שאוטומציית n8n עונה עליהן (מניעת תשובה כפולה)
+  const m = (t, h = []) => matchAutomation(t, h)?.group || null;
+  const askedTime = [{ role: "assistant", content: "[נשלחה תבנית שירות check_lead_what_time_contact: דנה]" }];
+  const cases = [
+    ["אישור לימודים", "study_cert"], ["אני צריכה אישור לימודים בבקשה", "study_cert"],
+    ["הזמנת ספרים", "order_books"], ["סטטוס משלוח", "books_shipping"],
+    ["מעוניין", "promo_1800"], ["אני מעוניינת", "promo_1800"],
+    ["אני רוצה לשמור מקום", "save_seat"],
+    ["הסר", "unsubscribe"], ["תורידו אותי מרשימת התפוצה", "unsubscribe"],
+    ["בוקר", "contact_time"], ["אחה\"צ", "contact_time"],
+    ["בוקר טוב", null], ["בוקר טוב", "contact_time", askedTime], ["אחרי הצהריים יותר נוח", "contact_time", askedTime],
+    ["הסרטון לא נפתח", null], ["ציונים", null], ["חשבונית", null], // קבוצה 5 כבויה
+    ["מה המסלולים ללימודים?", null], ["אשמח לפרטים נוספים", null], ["להרשמה לקורס", null],
+  ];
+  const bad = cases.filter(([t, exp, h]) => m(t, h) !== exp).map(([t, exp, h]) => `"${t}" → ${m(t, h)} (צפוי ${exp})`);
+  check("דילוג לאוטומציות n8n: 20 מקרים", bad.length === 0, bad.join(" | "));
 }
 {
   const r = await handleMessage(lead, [], "כמה עולה שנה א'?", ask);

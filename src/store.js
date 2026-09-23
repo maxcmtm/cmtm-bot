@@ -77,6 +77,17 @@ export function setServicePhone(p) {
   save();
 }
 
+// דריסות בזמן ריצה למצב האוטומציות של n8n (key → true/false). ריק = ברירת המחדל מהקוד.
+export function getAutomationOverrides() {
+  return state.runtime?.automationOverrides || {};
+}
+export function setAutomationOverride(key, active) {
+  if (!state.runtime.automationOverrides) state.runtime.automationOverrides = {};
+  if (active === null) delete state.runtime.automationOverrides[key];
+  else state.runtime.automationOverrides[key] = !!active;
+  save();
+}
+
 // טלפון מנהלת המכירות להתראות ליד חם (וואטסאפ)
 export function getAlertPhone() {
   return state.runtime?.alertPhone || "";
