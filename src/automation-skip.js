@@ -46,17 +46,32 @@ export const AUTOMATION_GROUPS = [
   { key: "save_seat", label: "שמירת מקום", active: true,
     phrases: ["אני רוצה לשמור מקום"] },
 
-  // ---- 5. בנויים אבל כבויים ב-n8n — להדליק כאן כשמדליקים שם ----
-  { key: "grades", label: "ציונים ומשובים", active: false,
+  // ---- 5. שירות לסטודנט, הופעלו ב-n8n 24/9 ----
+  { key: "grades", label: "ציונים ומשובים", active: true,
     phrases: ["ציונים ומשובים", "ציונים", "ציון", "משוב"] },
-  { key: "schedule", label: "מערכת שעות", active: false,
+  { key: "schedule", label: "מערכת שעות", active: true,
     phrases: ["מערכת שעות", "מערכת השעות"] },
-  { key: "tech_support", label: "תקלות טכניות", active: false,
+  { key: "tech_support", label: "תקלות טכניות", active: true,
     phrases: ["תמיכה טכנית", "תקלה טכנית", "תקלה"] },
-  { key: "payment_method", label: "שינוי אמצעי תשלום", active: false,
+  { key: "payment_method", label: "שינוי אמצעי תשלום", active: true,
     phrases: ["שינוי אמצעי תשלום", "אמצעי תשלום"] },
-  { key: "invoices", label: "קבלות וחשבוניות", active: false,
+  { key: "invoices", label: "קבלות וחשבוניות", active: true,
     phrases: ["קבלות וחשבוניות", "קבלות", "חשבונית"] },
+
+  // ---- 6. תפריט ייעוץ והרשמה של n8n (24/9). exact: רק כשההודעה היא בדיוק כפתור/אפשרות מהתפריט.
+  //      ליד שכותב משפט חופשי ("כמה עולה שנה א'?", "מה המסלולים?") מדבר עם נועה, לא עם התפריט. ----
+  { key: "menu", label: "תפריט ייעוץ והרשמה", active: true, exact: true,
+    phrases: [
+      "ייעוץ והרשמה", "מידע מסלולי לימודים", "תיאום שיחה עם יועץ", "לתיאום שיחה עם יועץ",
+      "תנאי קבלה ללימודים", "מלגות וסבסוד לימודים", "חזרה לתפריט הראשי",
+      "לימודים פרונטלים", "לימודים דיגיטלים", "לימודים פרונטליים", "לימודים דיגיטליים",
+      "שנה א'", "שנה ב'", "שנה ג'",
+      "להרשמה לשנה א'", "להרשמה לשנה ב'", "להרשמה לשנה ג'", "תנו לי מידע נוסף",
+    ] },
+  // מספרי תפריט. חריג: הודעת הפתיחה של נועה עצמה מבקשת לענות 1/2/3 — כשזו התשובה לה, נועה עונה.
+  { key: "menu_digits", label: "תפריט 1/2/3", active: true, exact: true,
+    unlessBotAsked: /הצעתי לבחור: 1|1 = מקצוע/,
+    phrases: ["1", "2", "3"] },
 ];
 
 // נרמול: רווחים כפולים, גרשיים חכמים, סימני פיסוק בקצוות
@@ -101,17 +116,21 @@ export function isUnsubscribeText(text) {
 
 // הודעה נכנסת → הקבוצה שהאוטומציה תענה עליה, או null אם נועה צריכה לענות
 export function matchAutomation(text, history = []) {
+  const lastBot = [...history].reverse().find((m) => m.role === "assistant")?.content || "";
   for (const g of AUTOMATION_GROUPS) {
     if (!isActive(g)) continue;
+    // נועה עצמה שאלה שאלה שהתשובה לה נראית כמו אפשרות תפריט (למשל 1/2/3) — זו תשובה לנועה
+    if (g.unlessBotAsked && g.unlessBotAsked.test(lastBot)) continue;
+    let hit;
     if (g.replyOnly) {
       // רק כתשובה לשאלת "מתי נוח": ההודעה היא בדיוק הביטוי, או שהתבנית נשלחה זה עתה
-      const lastBot = [...history].reverse().find((m) => m.role === "assistant");
-      const asked = /check_lead_what_time_contact|מתי נוח/.test(lastBot?.content || "");
-      const hit = g.phrases.find((p) => (asked ? containsWholePhrase(text, p) : equalsPhrase(text, p)));
-      if (hit) return { group: g.key, label: g.label, phrase: hit };
-      continue;
+      const asked = /check_lead_what_time_contact|מתי נוח/.test(lastBot);
+      hit = g.phrases.find((p) => (asked ? containsWholePhrase(text, p) : equalsPhrase(text, p)));
+    } else if (g.exact) {
+      hit = g.phrases.find((p) => equalsPhrase(text, p));
+    } else {
+      hit = g.phrases.find((p) => containsWholePhrase(text, p));
     }
-    const hit = g.phrases.find((p) => containsWholePhrase(text, p));
     if (hit) return { group: g.key, label: g.label, phrase: hit };
   }
   return null;
