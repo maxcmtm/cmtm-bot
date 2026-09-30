@@ -102,6 +102,14 @@ async function processWhatsApp(msg) {
       return;
     }
   }
+  // בחירה מתפריט וואטסאפ של WizUp (list_reply/button_reply) — התפריט עונה, נועה שותקת
+  if (msg.type === "interactive") {
+    const lead0 = getLead(msg.from, msg.name);
+    pushTurn(msg.from, msg.text || "[בחירה מתפריט]", "[בחירה מתפריט WizUp — נועה שתקה]");
+    updateLead(msg.from, { lastInboundTs: Date.now(), status: lead0.status === "in_sequence" ? "active_chat" : lead0.status });
+    console.log(`📋 ${msg.name || msg.from}: בחירה מתפריט "${msg.text}" — אין מענה מנועה`);
+    return;
+  }
   if (msg.type !== "text" || !msg.text) {
     await sendText(msg.from, "היי 🙂 כרגע אני יודעת לקרוא הודעות טקסט, כתבו לי ואשמח לעזור בכל שאלה על הלימודים!");
     return;

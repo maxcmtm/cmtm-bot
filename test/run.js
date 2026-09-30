@@ -5,6 +5,7 @@ import { config } from "../src/config.js";
 import { handleMessage } from "../src/brain.js";
 import { askClaude } from "../src/claude.js";
 import { matchAutomation } from "../src/automation-skip.js";
+import { parseIncoming } from "../src/whatsapp.js";
 
 const live = Boolean(config.anthropicKey);
 let pass = 0,
@@ -90,12 +91,31 @@ console.log("גרדריילים דטרמיניסטיים:");
     // תפריט: רק הודעה מדויקת. משפט חופשי שמכיל את הביטוי שייך לנועה
     ["שנה א'", "menu"], ["שנה א׳", "menu"], ["מידע מסלולי לימודים", "menu"], ["חזרה לתפריט הראשי", "menu"], ["להרשמה לשנה ב'", "menu"],
     ["כמה עולה שנה א'?", null], ["אני רוצה מידע מסלולי לימודים בבקשה", null], ["מתאים לי לימודים דיגיטלים או פרונטלים?", null],
+    // כפתורי WizUp עם אימוג'י
+    ["ייעוץ והרשמה 📝", "menu"], ["שירות לסטודנט 🎓", "menu"], ["אודות המכללה 🏫", "menu"], ["שאלות תשובות 📋", "menu"],
+    ["לימודים פרונטלים 🏛️", "menu"], ["שנה ב' 🌱", "menu"], ["תנו לי מידע נוסף ℹ️", "menu"], ["שעות פעילות 🕒", "menu"],
+    ["פרטי יצירת קשר 📞", "menu"], ["כתובת המכללה 📍", "menu"], ["הנהלת חשבונות 💰", "finance_dept"], ["קבלות וחשבוניות 🧾", "invoices"],
+    ["מה שעות הפעילות של המזכירות?", null], ["איפה כתובת המכללה בפתח תקווה?", null],
     // 1/2/3: תפריט של n8n, אלא אם נועה עצמה ביקשה לבחור 1/2/3 בהודעת הפתיחה
     ["1", "menu_digits"], ["2", "menu_digits"], ["3", "menu_digits"], ["1.", "menu_digits"], ["12", null],
     ["1", null, [{ role: "assistant", content: "[שלחתי הודעת פתיחה והצעתי לבחור: 1 = מקצוע טיפולי חדש, 2 = עזרה לילד או בן משפחה, 3 = מטפל קיים שרוצה כלי לקליניקה]" }]],
   ];
   const bad = cases.filter(([t, exp, h]) => m(t, h) !== exp).map(([t, exp, h]) => `"${t}" → ${m(t, h)} (צפוי ${exp})`);
   check(`דילוג לאוטומציות n8n: ${cases.length} מקרים`, bad.length === 0, bad.join(" | "));
+}
+{
+  // פענוח הודעות מתפריט WizUp: interactive נשאר interactive (נועה שותקת), כפתור תבנית הופך לטקסט
+  const body = { entry: [{ changes: [{ value: { contacts: [{ wa_id: "972500000001", profile: { name: "דנה" } }], messages: [
+    { from: "972500000001", id: "w1", type: "interactive", interactive: { type: "list_reply", list_reply: { id: "x", title: "אודות המכללה 🏫" } } },
+    { from: "972500000001", id: "w2", type: "interactive", interactive: { type: "button_reply", button_reply: { id: "y", title: "ייעוץ והרשמה 📝" } } },
+    { from: "972500000001", id: "w3", type: "button", button: { payload: "p", text: "כן, מעניין אותי" } },
+    { from: "972500000001", id: "w4", type: "text", text: { body: "היי" } },
+  ] } }] }] };
+  const p = parseIncoming(body);
+  check("parseIncoming: list_reply/button_reply → type interactive עם הכיתוב",
+    p[0].type === "interactive" && p[0].text === "אודות המכללה 🏫" && p[1].type === "interactive" && p[1].text === "ייעוץ והרשמה 📝",
+    JSON.stringify(p.slice(0, 2)));
+  check("parseIncoming: כפתור תבנית → טקסט רגיל", p[2].type === "text" && p[2].text === "כן, מעניין אותי" && p[3].text === "היי");
 }
 {
   const r = await handleMessage(lead, [], "כמה עולה שנה א'?", ask);

@@ -29,12 +29,18 @@ export function parseIncoming(body) {
       const nameByWa = {};
       for (const c of value.contacts || []) nameByWa[c.wa_id] = c.profile?.name;
       for (const m of value.messages || []) {
+        // בחירה מתפריט (list/button של WizUp) — נשמר הכיתוב שנבחר, הסוג נשאר interactive
+        const interactiveText = m.type === "interactive"
+          ? m.interactive?.list_reply?.title || m.interactive?.button_reply?.title || ""
+          : "";
+        // לחיצה על כפתור מהיר בתבנית — מתנהג כטקסט רגיל
+        const isButton = m.type === "button";
         out.push({
           from: m.from,
           name: nameByWa[m.from] || "",
           id: m.id,
-          type: m.type,
-          text: m.type === "text" ? m.text?.body || "" : "",
+          type: isButton ? "text" : m.type,
+          text: m.type === "text" ? m.text?.body || "" : isButton ? m.button?.text || "" : interactiveText,
           audioId: m.type === "audio" ? m.audio?.id || "" : "",
         });
       }
