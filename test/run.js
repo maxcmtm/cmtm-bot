@@ -82,7 +82,7 @@ console.log("גרדריילים דטרמיניסטיים:");
     ["אישור לימודים", "study_cert"], ["אני צריכה אישור לימודים בבקשה", "study_cert"],
     ["הזמנת ספרים", "order_books"], ["סטטוס משלוח", "books_shipping"],
     ["מעוניין", "promo_1800"], ["אני מעוניינת", "promo_1800"],
-    ["אני רוצה לשמור מקום", "save_seat"],
+    ["אני רוצה לשמור מקום", "save_seat"], ["שריינו לי את ההטבה", "reserve_benefit"], ["שריינו לי את ההטבה בבקשה 🙏", "reserve_benefit"],
     ["הסר", "unsubscribe"], ["תורידו אותי מרשימת התפוצה", "unsubscribe"],
     ["בוקר", "contact_time"], ["אחה\"צ", "contact_time"],
     ["בוקר טוב", null], ["בוקר טוב", "contact_time", askedTime], ["אחרי הצהריים יותר נוח", "contact_time", askedTime],

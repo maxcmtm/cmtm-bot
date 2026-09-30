@@ -45,6 +45,8 @@ export const AUTOMATION_GROUPS = [
     phrases: ["הרשמה למפגש זום 21.10", "אני רוצה להרשם לזום", "אני רוצה להירשם לזום"] },
   { key: "save_seat", label: "שמירת מקום", active: true,
     phrases: ["אני רוצה לשמור מקום"] },
+  { key: "reserve_benefit", label: "שריון הטבה", active: true,
+    phrases: ["שריינו לי את ההטבה", "תשריינו לי את ההטבה", "שריין לי את ההטבה"] },
 
   // ---- 5. שירות לסטודנט, הופעלו ב-n8n 24/9 ----
   { key: "grades", label: "ציונים ומשובים", active: true,
