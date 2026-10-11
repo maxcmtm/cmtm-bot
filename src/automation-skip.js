@@ -21,7 +21,7 @@ export const AUTOMATION_GROUPS = [
     phrases: ["סטטוס משלוח ספרים", "סטטוס משלוח", "משלוח ספרים"] },
 
   // ---- 2. הסרה מרשימת דיוור (האוטומציה מסירה ב-Fireberry, smoove ו-Wizup ושולחת אישור) ----
-  { key: "unsubscribe", label: "הסרה מרשימת דיוור", active: true,
+  { key: "unsubscribe", label: "הסרה מרשימת דיוור", active: true, noCap: true,
     phrases: [
       "הסר", "הסרה", "הסירו", "להסיר", "תסיר", "תסירו", "תפסיקו",
       "להוריד אותי", "תורידו אותי", "תוריד אותי",
@@ -39,7 +39,9 @@ export const AUTOMATION_GROUPS = [
     phrases: ["בוקר", "צהריים", "צהרים", "אחר הצהריים", "אחרי הצהריים", "אחה\"צ", "אחהצ"] },
 
   // ---- 4. שיווק והרשמות ----
-  { key: "promo_1800", label: "מבצע 1800", active: true,
+  // exact בכוונה: "הייתי אצלכם ביום פתוח ואני מעוניין להירשם" הוא ליד חם שמדבר עם נועה, לא כפתור מבצע.
+  // (עד 11/10 זה היה contains והשתיק 7 לידים חמים.)
+  { key: "promo_1800", label: "מבצע 1800", active: true, exact: true,
     phrases: ["מעוניין", "מעוניינת", "מעוניין/ת"] },
   { key: "zoom_2110", label: "מפגש זום 21.10", active: true,
     phrases: ["הרשמה למפגש זום 21.10", "אני רוצה להרשם לזום", "אני רוצה להירשם לזום"] },
@@ -84,6 +86,9 @@ export const AUTOMATION_GROUPS = [
     unlessBotAsked: /הצעתי לבחור: 1|1 = מקצוע/,
     phrases: ["1", "2", "3"] },
 ];
+
+// מעל כמה מילים הודעה כבר לא נחשבת "מילת מפתח" לאוטומציה (קבוצות contains בלבד)
+const MAX_KEYWORD_WORDS = 6;
 
 // נרמול: רווחים כפולים, גרשיים חכמים, סימני פיסוק בקצוות
 function normalize(text) {
@@ -140,6 +145,10 @@ export function matchAutomation(text, history = []) {
     } else if (g.exact) {
       hit = g.phrases.find((p) => equalsPhrase(text, p));
     } else {
+      // הודעה ארוכה היא שיחה אמיתית, לא מילת מפתח: "...אקבל מכם תעודה עם ציון..." זו שאלה לנועה.
+      // (חריג: הסרה — "אני לא מעוניינת, בבקשה להפסיק לשלוח לי" חייבת להיתפס גם כשהיא ארוכה)
+      const words = normalize(text).split(" ").filter(Boolean).length;
+      if (!g.noCap && words > MAX_KEYWORD_WORDS) continue;
       hit = g.phrases.find((p) => containsWholePhrase(text, p));
     }
     if (hit) return { group: g.key, label: g.label, phrase: hit };

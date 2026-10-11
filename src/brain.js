@@ -42,8 +42,8 @@ function isAckAfterClosing(text, history) {
   const lastBot = [...(history || [])].reverse().find((m) => m.role === "assistant");
   if (!lastBot) return false;
   const c = (lastBot.content || "").trim();
-  // התשובה הקודמת של נועה הייתה סיום קצר בלי שאלה פתוחה
-  return c.length <= 90 && !c.includes("?") && !c.startsWith("[");
+  // התשובה הקודמת של נועה הייתה סיום בלי שאלה פתוחה
+  return c.length <= 140 && !c.includes("?") && !c.startsWith("[");
 }
 
 // לולאת הודעות חוזרות (משיבונים אוטומטיים של עסקים): אותה הודעה שוב ושוב.
@@ -181,7 +181,42 @@ export async function handleMessage(lead, history, incoming, askFn = askClaude, 
     if (!result.handoff_reason) result.handoff_reason = "הליד ביקש לדבר עם נציג";
   }
 
-  // ניקוי קווים מפרידים מהתשובה לפני שליחה (טון אנושי)
-  result.reply = humanizeDashes(result.reply);
+  // ניקוי טון דטרמיניסטי לפני שליחה: קווים, הבטחות זמן, שם פרטי חוזר, מספר ישן
+  result.reply = humanizeTone(result.reply, lead, history);
   return result;
+}
+
+// הבטחות זמן שהמודל ממשיך לייצר למרות הפרומפט (סקירה 11/10: 18 מקרים של "עוד היום") → "בהקדם"
+// (\b לא עובד עם עברית ב-JS → גבולות מילה ידניים)
+const TIME_PROMISE_RE = /(?<![א-ת])(עוד היום|היום עוד|תוך (?:חצי |כמה )?(?:שעה|שעות|דקות)|בדקות הקרובות|בשעות הקרובות|עוד מעט|בקרוב מאוד)(?![א-ת])/g;
+// המספר הישן של השירות (052-288-4221) יוצא משימוש — המזכירות היא 8752* / 077-412-1443
+const OLD_SERVICE_NUMBER_RE = /0?52[-\s]?288[-\s]?4221/g;
+
+export function humanizeTone(text, lead = {}, history = []) {
+  if (!text) return text;
+  text = humanizeDashes(text);
+  text = text.replace(TIME_PROMISE_RE, "בהקדם").replace(/בהקדם בהקדם/g, "בהקדם");
+  text = text.replace(OLD_SERVICE_NUMBER_RE, "077-412-1443");
+  text = stripRepeatedName(text, lead, history);
+  return text;
+}
+
+// שם פרטי: פעם אחת בשיחה. אם נועה כבר פנתה בשם בתור קודם, מסירים פנייה בשם מהתשובה הנוכחית.
+// מסירים רק צורות פנייה (בתחילת משפט, אחרי פסיק, לפני פסיק/אימוג'י), לא שם שמופיע בתוך משפט.
+export function stripRepeatedName(text, lead = {}, history = []) {
+  const first = (lead.name || "").trim().split(/\s+/)[0];
+  if (!first || first.length < 2 || !/^[א-ת]+$/.test(first)) return text; // רק שמות בעברית, בלי אימוג'י/לטינית
+  if (!text.includes(first)) return text;
+  const usedBefore = (history || []).some((m) => m.role === "assistant" && !(m.content || "").startsWith("[") && (m.content || "").includes(first));
+  if (!usedBefore) {
+    // גם בתוך תשובה אחת: לא יותר מפעם אחת
+    let n = 0;
+    return text.replace(new RegExp(`(^|[\\s,])${first}(?=[\\s,!.🙂😊]|$)`, "g"), (m, pre) => (++n === 1 ? m : pre === "," ? "" : pre.trimEnd()));
+  }
+  let t = text;
+  t = t.replace(new RegExp(`^${first},?\\s+`, "gm"), ""); // "תניא, אני..." בתחילת שורה
+  t = t.replace(new RegExp(`(היי|שלום|בוקר טוב|ערב טוב|תודה|מעולה|מצוין|קיבלתי|בכיף|בשמחה|בהצלחה)\\s+${first}(?=[\\s,!.🙂😊]|$)`, "g"), "$1"); // "היי תניא"
+  t = t.replace(new RegExp(`,\\s*${first}(?=[\\s,!.🙂😊]|$)`, "g"), ""); // "מעולה, תניא 🙂"
+  t = t.replace(new RegExp(`\\s+${first}\\s*(?=[!.🙂😊])`, "g"), ""); // "בהצלחה תניא!"
+  return t.replace(/[ \t]{2,}/g, " ").replace(/\s+([,!.])/g, "$1");
 }

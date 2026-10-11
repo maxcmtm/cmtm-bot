@@ -106,7 +106,8 @@ async function processWhatsApp(msg) {
   if (msg.type === "interactive") {
     const lead0 = getLead(msg.from, msg.name);
     pushTurn(msg.from, msg.text || "[בחירה מתפריט]", "[בחירה מתפריט WizUp — נועה שתקה]");
-    updateLead(msg.from, { lastInboundTs: Date.now(), status: lead0.status === "in_sequence" ? "active_chat" : lead0.status });
+    // lastIntent=automation: שלא תישלח "תזכורת עדינה" למי שבאמצע תפריט של WizUp (קרה 6 פעמים)
+    updateLead(msg.from, { lastInboundTs: Date.now(), lastIntent: "automation", status: lead0.status === "in_sequence" ? "active_chat" : lead0.status });
     console.log(`📋 ${msg.name || msg.from}: בחירה מתפריט "${msg.text}" — אין מענה מנועה`);
     return;
   }
@@ -140,7 +141,7 @@ async function processWhatsApp(msg) {
     const isUnsub = auto.group === "unsubscribe";
     updateLead(msg.from, {
       lastInboundTs: Date.now(),
-      lastIntent: isUnsub ? "unsubscribe" : lead.lastIntent || "",
+      lastIntent: isUnsub ? "unsubscribe" : "automation", // לא "question" → בלי תזכורת עדינה
       status: isUnsub ? "unsubscribed" : lead.status === "in_sequence" ? "active_chat" : lead.status,
     });
     console.log(`🤖 ${msg.name || msg.from}: "${msg.text}" → אוטומציית ${auto.label} (${auto.phrase}) — אין מענה מנועה`);
@@ -224,7 +225,8 @@ async function processWhatsApp(msg) {
     );
   }
   // ליד שמתלונן שלא חזרו אליו — אזעקה למנהלת המכירות (גם אם כבר סומן חם בעבר)
-  const COMPLAINT_RE = /לא חזרו אלי|לא חוזרים אלי|אף אחד לא (עונה|חוזר|מגיב)|למה לא (חוזרים|התקשרתם)|עדיין לא (חזרו|התקשרו)|מחכה שיחזרו/;
+  // כולל "היועצת עוד לא חזרה אלי", "מחכה 3 ימים", "מתי היא מתקשרת" (מקרה תניא, 10/10: 5 שאלות "מתי" בלי אזעקה)
+  const COMPLAINT_RE = /לא חזרו אלי|לא חוזרים אלי|אף אחד לא (עונה|חוזר|מגיב)|למה לא (חוזרים|התקשרתם|חזרתם)|(עוד|עדיין) לא (חזרו|חזרה|חזר|התקשרו|התקשרה|התקשר|יצרו קשר)|מחכה (כבר )?(שיחזרו|כמה ימים|יומיים|שלוש|\d+ ימים)|מתי (היא |הוא |היועצת |היועץ )?(תחזור|יחזור|מתקשרת|מתקשר|תתקשר|יתקשר)|כמה זמן (זה )?(לוקח|בהקדם)/;
   if (COMPLAINT_RE.test(msg.text || "") && getAlertPhone()) {
     const key = `complaint_${msg.from}`;
     if (Date.now() - getLastAlert(key) > 12 * 3600000) {
