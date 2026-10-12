@@ -59,6 +59,17 @@ export function setLastAlert(key) {
   save();
 }
 
+// תור הודעות שנכשלו (קרדיט Anthropic נגמר וכו') — מנוסות שוב אוטומטית כשהשירות חוזר.
+// 13 תקריות קרדיט עד 12/10: בכל פעם לידים נשארו בלי מענה עד ששוחזרו ידנית.
+export function addPending(entry) {
+  if (!state.pending) state.pending = [];
+  state.pending.push({ ts: Date.now(), tries: 0, ...entry });
+  if (state.pending.length > 300) state.pending = state.pending.slice(-300);
+  save();
+}
+export function getPending() { return state.pending || []; }
+export function setPending(list) { state.pending = list; save(); }
+
 // יומן שליחות שירות (תבניות/טקסט מאוטומציות ומהדאשבורד) — 500 אחרונות
 export function logSend(entry) {
   if (!state.sends) state.sends = [];

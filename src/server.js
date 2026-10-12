@@ -40,6 +40,9 @@ import {
   logSend,
   getSends,
   setAutomationOverride,
+  addPending,
+  getPending,
+  setPending,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -161,19 +164,21 @@ async function processWhatsApp(msg) {
     decision = await handleMessage(lead, history.slice(-16), msg.text, undefined,
       studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה", studentInfo } : {});
   } catch (err) {
-    // גם אחרי ניסיונות חוזרים נכשל — הליד לא נשאר בלי מענה
+    // גם אחרי ניסיונות חוזרים נכשל — ההודעה נכנסת לתור ניסיון-חוזר אוטומטי (retryPending כל 10 דק')
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
     logFailure({ phone: msg.from, name: msg.name, text: msg.text, error: err.message });
+    const alreadyWaiting = getPending().some((p) => p.phone === msg.from);
+    addPending({ phone: msg.from, name: msg.name, text: msg.text, error: err.message.slice(0, 120) });
     // קרדיט Anthropic נגמר — מתריעים למקס מיד (הוואטסאפ עדיין עובד בתרחיש הזה)
     if (/credit balance is too low/i.test(err.message || "")) {
       alertAdmin("anthropic_credit",
-        "🔴 הקרדיט של Anthropic נגמר — נועה לא עונה ללידים!\nטעינה: console.anthropic.com → Plans & Billing (ושווה להפעיל שם Auto-reload).", 6).catch(() => {});
+        "🔴 הקרדיט של Anthropic נגמר — נועה לא עונה ללידים!\nטעינה: console.anthropic.com → Plans & Billing (ושווה להפעיל שם Auto-reload).\nההודעות נשמרות ויענו אוטומטית כשהקרדיט יחזור.", 6).catch(() => {});
     }
-    await sendText(
-      msg.from,
-      "היי 🙂 קיבלתי את ההודעה שלך ומשהו קטן השתבש לי בדרך. אשמח אם תוכל/י לכתוב שוב, או שפשוט אעביר אותך ליועצת שלנו שתחזור אליך. מה נוח לך?"
-    );
-    return;
+    // הודעת החזקה אחת לליד (לא על כל הודעה), בלי הבטחת זמן
+    if (!alreadyWaiting && !msg._retry) {
+      await sendText(msg.from, "היי 🙂 קיבלתי את ההודעה שלך, רגע של עומס אצלי. אחזור אליך בהקדם.");
+    }
+    return false;
   }
   // הודעה חוזרת בפעם השלישית+ — רושמים ולא עונים (שובר לולאות משיבונים)
   if (decision._silent) {
@@ -276,6 +281,41 @@ async function processWhatsApp(msg) {
   })().catch((e) => console.error("[fireberry] log:", e.message));
 }
 
+// ניסיון חוזר אוטומטי להודעות שנכשלו (קרדיט/תקלת API): כל 10 דקות, לפי סדר הגעה,
+// רק בתוך חלון 24 השעות של וואטסאפ. כישלון ראשון עוצר את הסבב (השירות עדיין למטה).
+let retrying = false;
+export async function retryPending() {
+  if (retrying) return 0;
+  const list = getPending();
+  if (!list.length) return 0;
+  retrying = true;
+  let done = 0;
+  try {
+    const fresh = list.filter((p) => Date.now() - p.ts < 23 * 3600000);
+    if (fresh.length !== list.length) setPending(fresh); // ישנות מדי — אי אפשר לענות בטקסט חופשי
+    for (const p of fresh) {
+      const ok = await enqueueByPhone(p.phone, () => processWhatsApp({
+        from: p.phone, name: p.name || "", id: `retry.${p.phone}.${p.ts}.${p.tries}`, type: "text", text: p.text, _retry: true,
+      }));
+      if (ok === false) {
+        p.tries = (p.tries || 0) + 1;
+        setPending(getPending()); // שומר את מונה הניסיונות
+        console.log(`⏳ ניסיון חוזר נכשל (${p.phone}) — השירות עדיין לא זמין, ממתינים לסבב הבא`);
+        break;
+      }
+      setPending(getPending().filter((x) => !(x.phone === p.phone && x.ts === p.ts)));
+      done++;
+      console.log(`♻️ הודעה שנכשלה נענתה בניסיון חוזר → ${p.name || p.phone}`);
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  } finally {
+    retrying = false;
+  }
+  if (done) alertAdmin("retry_done", `♻️ נועה חזרה לענות: ${done} הודעות שנכשלו נענו אוטומטית.`, 1).catch(() => {});
+  return done;
+}
+setInterval(() => retryPending().catch((e) => console.error("[retry]", e.message)), 10 * 60 * 1000);
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${config.port}`);
   const path = url.pathname;
@@ -323,6 +363,7 @@ const server = http.createServer(async (req, res) => {
     }));
     return send(res, 200, {
       sends: getSends().slice(-200),
+      pending: getPending().length,
       now: Date.now(),
       dripEnabled: config.drip.enabled,
       paused: isPaused(),
