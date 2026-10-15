@@ -62,9 +62,11 @@ export const config = {
     stepDays: Number(process.env.DRIP_STEP_DAYS || 3), // מרווח בין הודעות חימום
     quietHours: Number(process.env.DRIP_QUIET_HOURS || 48), // לא לשלוח אם ענה לאחרונה
     checkMinutes: Number(process.env.DRIP_CHECK_MINUTES || 60), // תדירות בדיקת הסקדולר
-    dailyCap: Number(process.env.DRIP_DAILY_CAP || 200), // תקרת תבניות ליום (הגנת איכות מספר מול מטא)
-    runCap: Number(process.env.DRIP_RUN_CAP || 30), // תקרה לסבב בדיקה אחד — מפזר את העומס על היום
-    maxSilentStep: Number(process.env.DRIP_MAX_SILENT_STEP || 5), // ליד שמעולם לא ענה עוצר אחרי שלב זה
+    // 15/10: הורדת נפח יזום לשמירה על דירוג ירוק. נתוני תגובה לפי שלב (7,143 לידים): שלב 0: 88%, 1: 72%,
+    // 2: 58%, 3: 42%, 4: 6.5%, 5: 2.7%, 6+: ~0. מעבר לשלב 3 כמעט אין מענה — רק חסימות ודיווחים.
+    dailyCap: Number(process.env.DRIP_DAILY_CAP || 100), // תקרת תבניות ליום (היה 200)
+    runCap: Number(process.env.DRIP_RUN_CAP || 15), // תקרה לסבב שעתי — פיזור על היום (היה 30)
+    maxSilentStep: Number(process.env.DRIP_MAX_SILENT_STEP || 3), // ליד שמעולם לא ענה עוצר אחרי שלב זה (היה 5)
   },
   links: {
     tasteLesson: process.env.LINK_TASTE_LESSON || "https://cmtm.co.il/free-lessons/",

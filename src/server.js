@@ -412,6 +412,8 @@ const server = http.createServer(async (req, res) => {
       tokenValid,
       tokenErr,
       numberQuality: quality,
+      drip: { dailyCap: config.drip.dailyCap, runCap: config.drip.runCap, maxSilentStep: config.drip.maxSilentStep, stepDays: config.drip.stepDays },
+      pending: getPending().length,
       studentSet: studentSetSize(),
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
