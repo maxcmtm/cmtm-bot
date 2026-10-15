@@ -170,7 +170,10 @@ async function processWhatsApp(msg) {
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
     logFailure({ phone: msg.from, name: msg.name, text: msg.text, error: err.message });
     const alreadyWaiting = getPending().some((p) => p.phone === msg.from);
-    addPending({ phone: msg.from, name: msg.name, text: msg.text, error: err.message.slice(0, 120) });
+    // ניסיון חוזר שנכשל נשאר בתור כמו שהוא (retryPending מעלה tries) — לא מוסיפים אותו שוב.
+    // הודעה חדשה נכנסת לתור פעם אחת בלבד (אותו טלפון + אותו טקסט = משיבון אוטומטי שחוזר).
+    const duplicate = getPending().some((p) => p.phone === msg.from && p.text === msg.text);
+    if (!msg._retry && !duplicate) addPending({ phone: msg.from, name: msg.name, text: msg.text, error: err.message.slice(0, 120) });
     // קרדיט Anthropic נגמר — מתריעים למקס מיד (הוואטסאפ עדיין עובד בתרחיש הזה)
     if (/credit balance is too low/i.test(err.message || "")) {
       alertAdmin("anthropic_credit",
@@ -293,8 +296,17 @@ export async function retryPending() {
   retrying = true;
   let done = 0;
   try {
-    const fresh = list.filter((p) => Date.now() - p.ts < 23 * 3600000);
+    // איחוד כפילויות (אותו טלפון + אותו טקסט): נשארת הראשונה
+    const seenKey = new Set();
+    const unique = list.filter((p) => { const k = p.phone + "\n" + p.text; if (seenKey.has(k)) return false; seenKey.add(k); return true; });
+    const fresh = unique.filter((p) => Date.now() - p.ts < 23 * 3600000);
+    const expired = unique.filter((p) => Date.now() - p.ts >= 23 * 3600000);
     if (fresh.length !== list.length) setPending(fresh); // ישנות מדי — אי אפשר לענות בטקסט חופשי
+    if (expired.length) {
+      const names = [...new Set(expired.map((p) => p.name || waToIsraeli(p.phone)))].slice(0, 15).join(", ");
+      console.log(`⌛ ${expired.length} הודעות שנכשלו עברו 23 שעות ונזרקו מהתור: ${names}`);
+      alertAdmin("retry_expired", `⌛ ${expired.length} הודעות מ-${new Set(expired.map((p) => p.phone)).size} אנשים נכשלו ועברו 24 שעות — אי אפשר לענות להם בטקסט חופשי. לטיפול ידני:\n${names}`, 1).catch(() => {});
+    }
     for (const p of fresh) {
       const ok = await enqueueByPhone(p.phone, () => processWhatsApp({
         from: p.phone, name: p.name || "", id: `retry.${p.phone}.${p.ts}.${p.tries}`, type: "text", text: p.text, _retry: true,
@@ -317,6 +329,7 @@ export async function retryPending() {
   return done;
 }
 setInterval(() => retryPending().catch((e) => console.error("[retry]", e.message)), 10 * 60 * 1000);
+setTimeout(() => retryPending().catch((e) => console.error("[retry]", e.message)), 45 * 1000); // גם אחרי כל עלייה (פריסה = ריסטארט)
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${config.port}`);
