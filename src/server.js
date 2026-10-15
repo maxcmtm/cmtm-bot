@@ -43,6 +43,8 @@ import {
   addPending,
   getPending,
   setPending,
+  exportState,
+  importState,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -444,6 +446,25 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // העברת שרת: ייצוא כל המצב (leads.json) / ייבוא לשרת החדש. הייבוא דורס את המצב הקיים.
+  if (req.method === "GET" && path === "/admin/export") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify(exportState()));
+  }
+  if (req.method === "POST" && path === "/admin/import") {
+    let raw = "";
+    try { raw = await readBody(req); } catch { return send(res, 400, { error: "read failed" }); }
+    let body;
+    try { body = JSON.parse(raw); } catch { return send(res, 400, { error: "bad json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    try {
+      const r = importState(body.state);
+      console.log(`📦 מצב יובא: ${r.leads} לידים, ${r.pending} בתור`);
+      return send(res, 200, { imported: true, ...r });
+    } catch (e) { return send(res, 400, { error: e.message }); }
+  }
+
   // מצב אוטומציות n8n שנועה מדלגת עליהן: GET = רשימה, POST {group, active} = הדלקה/כיבוי בזמן ריצה
   if (path === "/admin/automation" && (req.method === "GET" || req.method === "POST")) {
     let body = {};

@@ -59,6 +59,19 @@ export function setLastAlert(key) {
   save();
 }
 
+// ייצוא/ייבוא של כל המצב (להעברת שרת): leads, seen, runtime, sends, failures, reports, pending
+export function exportState() {
+  return state;
+}
+export function importState(obj) {
+  if (!obj || typeof obj !== "object" || !obj.leads) throw new Error("state חסר leads");
+  state = obj;
+  if (!state.seen) state.seen = [];
+  if (!state.runtime) state.runtime = {};
+  save();
+  return { leads: Object.keys(state.leads).length, seen: state.seen.length, pending: (state.pending || []).length };
+}
+
 // תור הודעות שנכשלו (קרדיט Anthropic נגמר וכו') — מנוסות שוב אוטומטית כשהשירות חוזר.
 // 13 תקריות קרדיט עד 12/10: בכל פעם לידים נשארו בלי מענה עד ששוחזרו ידנית.
 export function addPending(entry) {
