@@ -475,6 +475,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // סימון ידני ברשימת ההגעה: {phone, kind: "confirmed"|"declined"|"clear", text?}
+  if (req.method === "POST" && path === "/admin/attendance") {
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "bad json" }); }
+    if (body.secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const phone = normalizePhone(body.phone || "");
+    if (!phone) return send(res, 400, { error: "phone" });
+    const now = Date.now();
+    const f = body.kind === "confirmed" ? { confirmedTs: now, declinedTs: 0 }
+      : body.kind === "declined" ? { declinedTs: now, confirmedTs: 0 }
+      : body.kind === "clear" ? { confirmedTs: 0, declinedTs: 0 } : null;
+    if (!f) return send(res, 400, { error: "kind" });
+    if (body.text) f.attendanceText = String(body.text).slice(0, 60);
+    updateLead(phone, f);
+    return send(res, 200, { phone, ...f });
+  }
+
   // צריכת טוקנים ועלות לפי יום ומודל: ?days=7
   if (req.method === "GET" && path === "/admin/usage") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
