@@ -1,7 +1,12 @@
 // קריאה ל-Claude API עם tool-use לפלט מובנה ואמין (בלי פענוח טקסט חופשי)
 import { config } from "./config.js";
 import { SYSTEM_PROMPT } from "./knowledge.js";
-import { getRuntimeModel, logUsage } from "./store.js";
+import { getRuntimeModel, getRuntimeAnthropicKey, logUsage } from "./store.js";
+
+// המפתח הפעיל: הגדרת זמן-ריצה (POST /admin/token {anthropicKey}) גוברת על ANTHROPIC_API_KEY
+export function activeAnthropicKey() {
+  return getRuntimeAnthropicKey() || config.anthropicKey;
+}
 
 // המודל הפעיל: הגדרת זמן-ריצה (POST /admin/token {model}) גוברת על BOT_MODEL
 export function activeModel() {
@@ -74,14 +79,14 @@ export const RESPOND_TOOL = {
 
 // סיכום ליד לפי היסטוריה קיימת (ללידים ישנים שאין להם סיכום) — מודל זול
 export async function summarizeLead(history, lead) {
-  if (!config.anthropicKey) throw new Error("אין מפתח API");
+  if (!activeAnthropicKey()) throw new Error("אין מפתח API");
   const convo = history
     .map((t) => (t.role === "user" ? "הלקוח: " : "נועה: ") + t.content)
     .join("\n");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
-      "x-api-key": config.anthropicKey,
+      "x-api-key": activeAnthropicKey(),
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
@@ -111,7 +116,7 @@ export async function summarizeLead(history, lead) {
  * @returns {Promise<{reply,persona,intent,score_delta,handoff,handoff_reason}>}
  */
 export async function askClaude(messages) {
-  if (!config.anthropicKey) {
+  if (!activeAnthropicKey()) {
     throw new Error("ANTHROPIC_API_KEY חסר — הגדר אותו ב-.env");
   }
 
@@ -135,7 +140,7 @@ export async function askClaude(messages) {
       res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
-          "x-api-key": config.anthropicKey,
+          "x-api-key": activeAnthropicKey(),
           "anthropic-version": "2023-06-01",
           "content-type": "application/json",
         },

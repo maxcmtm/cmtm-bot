@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
-import { summarizeLead, activeModel, estimateCost, PRICES } from "./claude.js";
+import { summarizeLead, activeModel, activeAnthropicKey, estimateCost, PRICES } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
@@ -47,6 +47,7 @@ import {
   importState,
   setRuntimeModel,
   getUsage,
+  setRuntimeAnthropicKey,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -351,7 +352,7 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, {
       ok: true,
       model: config.model,
-      mode: config.anthropicKey ? "live" : "mock",
+      mode: activeAnthropicKey() ? "live" : "mock",
       whatsapp: config.whatsapp.phoneNumberId ? "connected" : "not-configured",
     });
   }
@@ -732,6 +733,13 @@ const server = http.createServer(async (req, res) => {
       setAlertPhone(normalizePhone(body.alertPhone));
       updated.push("alertPhone");
     }
+    // רוטציית מפתח Anthropic בלי Render: {anthropicKey:"sk-ant-..."}; {anthropicKey:""} חוזר למשתנה הסביבה
+    if ("anthropicKey" in body) {
+      if (body.anthropicKey && !/^sk-ant-/.test(body.anthropicKey)) return send(res, 400, { error: "מפתח לא תקין" });
+      setRuntimeAnthropicKey(body.anthropicKey || "");
+      updated.push("anthropicKey");
+      console.log("🔑 מפתח Anthropic עודכן בזמן ריצה");
+    }
     // החלפת מודל בזמן ריצה: {model:"claude-haiku-5-5"}; {model:""} חוזר ל-BOT_MODEL
     if ("model" in body) {
       if (body.model && !PRICES[body.model]) return send(res, 400, { error: "מודל לא מוכר", known: Object.keys(PRICES) });
@@ -867,7 +875,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, () => {
   console.log(
     `🤖 בוט נועה רץ על http://localhost:${config.port}  (מודל: ${
-      config.anthropicKey ? "LIVE" : "MOCK"
+      activeAnthropicKey() ? "LIVE" : "MOCK"
     } · WhatsApp: ${config.whatsapp.phoneNumberId ? "מחובר" : "לא מוגדר"})`
   );
   console.log("   GET /health · GET|POST /whatsapp · POST /webhook · POST /lead");

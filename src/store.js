@@ -59,6 +59,15 @@ export function setLastAlert(key) {
   save();
 }
 
+// מפתח Anthropic בזמן ריצה (גובר על ANTHROPIC_API_KEY) — לרוטציית מפתח בלי לגעת ב-Render: POST /admin/token {anthropicKey}
+export function getRuntimeAnthropicKey() {
+  return state.runtime?.anthropicKey || "";
+}
+export function setRuntimeAnthropicKey(k) {
+  state.runtime.anthropicKey = k || "";
+  save();
+}
+
 // מודל בזמן ריצה (גובר על BOT_MODEL) — להחלפת מודל בלי פריסה: POST /admin/token {model}
 export function getRuntimeModel() {
   return state.runtime?.model || "";
