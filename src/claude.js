@@ -1,6 +1,25 @@
 // קריאה ל-Claude API עם tool-use לפלט מובנה ואמין (בלי פענוח טקסט חופשי)
 import { config } from "./config.js";
 import { SYSTEM_PROMPT } from "./knowledge.js";
+import { getRuntimeModel, logUsage } from "./store.js";
+
+// המודל הפעיל: הגדרת זמן-ריצה (POST /admin/token {model}) גוברת על BOT_MODEL
+export function activeModel() {
+  return getRuntimeModel() || config.model;
+}
+
+// מחירים לדולר למיליון טוקנים (קלט / פלט / קריאת cache / כתיבת cache 1h) — להערכת עלות ב-/admin
+export const PRICES = {
+  "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite1h: 6, cacheWrite5m: 3.75 },
+  "claude-sonnet-5-5": { input: 2, output: 10, cacheRead: 0.2, cacheWrite1h: 4, cacheWrite5m: 2.5 },
+  "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite1h: 2, cacheWrite5m: 1.25 },
+  "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite1h: 2, cacheWrite5m: 1.25 },
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite1h: 0.2, cacheWrite5m: 0.125 },
+};
+export function estimateCost(u) {
+  const p = PRICES[u.model] || PRICES["claude-sonnet-4-6"];
+  return (u.input * p.input + u.output * p.output + u.cacheRead * p.cacheRead + u.cacheWrite1h * p.cacheWrite1h + u.cacheWrite5m * p.cacheWrite5m) / 1e6;
+}
 
 // הגדרת הכלי שמכריח את המודל להחזיר JSON בסכימה קבועה
 export const RESPOND_TOOL = {
@@ -67,8 +86,9 @@ export async function summarizeLead(history, lead) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 300,
+      model: "claude-haiku-5-5",
+      max_tokens: 600, // כולל מקום לחשיבה אדפטיבית קצרה
+      output_config: { effort: "low" },
       messages: [
         {
           role: "user",
@@ -79,7 +99,10 @@ export async function summarizeLead(history, lead) {
   });
   if (!res.ok) throw new Error(`summarize ${res.status}`);
   const data = await res.json();
-  return (data.content?.[0]?.text || "").replace(/\*\*/g, "").replace(/^סיכום[^:]*:\s*/, "").trim();
+  try { logUsage("claude-haiku-5-5", data.usage || {}); } catch { /* מעקב בלבד */ }
+  // קוראים לפי type (דור 5.5 יכול להתחיל בבלוק thinking)
+  const text = (data.content || []).find((b) => b.type === "text")?.text || "";
+  return text.replace(/\*\*/g, "").replace(/^סיכום[^:]*:\s*/, "").trim();
 }
 
 /**
@@ -92,8 +115,9 @@ export async function askClaude(messages) {
     throw new Error("ANTHROPIC_API_KEY חסר — הגדר אותו ב-.env");
   }
 
+  const model = activeModel();
   const body = {
-    model: config.model,
+    model,
     max_tokens: 1024,
     // caching על הפרומפט הגדול (הוראות + בסיס ידע) — חוסך ~90% מעלות הקלט בקריאות חוזרות
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral", ttl: "1h" } }],
@@ -101,6 +125,8 @@ export async function askClaude(messages) {
     tool_choice: { type: "tool", name: "respond_to_lead" },
     messages,
   };
+  // דור 5.5 (Haiku/Sonnet): חשיבה אדפטיבית מופעלת כברירת מחדל — effort נמוך לשיחת וואטסאפ קצרה (עלות ומהירות)
+  if (/-5-5/.test(model)) body.output_config = { effort: "low" };
 
   // עד 3 ניסיונות עם המתנה — כדי שתקלה רגעית (עומס/רשת) לא תשאיר ליד בלי מענה
   let res, lastErr;
@@ -129,6 +155,7 @@ export async function askClaude(messages) {
   if (!res || !res.ok) throw lastErr || new Error("Claude API failed");
 
   const data = await res.json();
+  try { logUsage(model, data.usage || {}); } catch { /* מעקב בלבד */ }
   const toolUse = (data.content || []).find((b) => b.type === "tool_use");
   if (!toolUse) {
     throw new Error("המודל לא החזיר tool_use — תשובה לא צפויה");

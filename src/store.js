@@ -59,6 +59,39 @@ export function setLastAlert(key) {
   save();
 }
 
+// מודל בזמן ריצה (גובר על BOT_MODEL) — להחלפת מודל בלי פריסה: POST /admin/token {model}
+export function getRuntimeModel() {
+  return state.runtime?.model || "";
+}
+export function setRuntimeModel(m) {
+  state.runtime.model = m || "";
+  save();
+}
+
+// מעקב צריכת טוקנים לפי יום ומודל — כדי לדעת מה נועה באמת עולה (ולא לנחש מי שרף את הקרדיט)
+export function logUsage(model, usage = {}) {
+  if (!state.usage) state.usage = {};
+  const day = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jerusalem" })).toISOString().slice(0, 10);
+  const key = `${day}|${model}`;
+  const u = state.usage[key] || { day, model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
+  u.calls++;
+  u.input += usage.input_tokens || 0;
+  u.output += usage.output_tokens || 0;
+  u.cacheRead += usage.cache_read_input_tokens || 0;
+  const cc = usage.cache_creation || {};
+  u.cacheWrite5m += cc.ephemeral_5m_input_tokens || 0;
+  u.cacheWrite1h += cc.ephemeral_1h_input_tokens ?? ((usage.cache_creation_input_tokens || 0) - (cc.ephemeral_5m_input_tokens || 0));
+  state.usage[key] = u;
+  // שומרים 60 יום
+  const keys = Object.keys(state.usage).sort();
+  while (keys.length > 60 * 4) delete state.usage[keys.shift()];
+  save();
+}
+export function getUsage(days = 7) {
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  return Object.values(state.usage || {}).filter((u) => u.day >= since).sort((a, b) => a.day.localeCompare(b.day));
+}
+
 // ייצוא/ייבוא של כל המצב (להעברת שרת): leads, seen, runtime, sends, failures, reports, pending
 export function exportState() {
   return state;

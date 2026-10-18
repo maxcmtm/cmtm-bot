@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
-import { summarizeLead } from "./claude.js";
+import { summarizeLead, activeModel, estimateCost, PRICES } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
@@ -45,6 +45,8 @@ import {
   setPending,
   exportState,
   importState,
+  setRuntimeModel,
+  getUsage,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -422,6 +424,9 @@ const server = http.createServer(async (req, res) => {
       numberQuality: quality,
       drip: { dailyCap: config.drip.dailyCap, runCap: config.drip.runCap, maxSilentStep: config.drip.maxSilentStep, stepDays: config.drip.stepDays },
       pending: getPending().length,
+      model: activeModel(),
+      // צריכה היום לפי מודל + הערכת עלות בדולרים (מחירון ב-claude.js)
+      usageToday: getUsage(1).map((u) => ({ ...u, usd: +estimateCost(u).toFixed(3) })),
       studentSet: studentSetSize(),
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
@@ -469,6 +474,15 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // צריכת טוקנים ועלות לפי יום ומודל: ?days=7
+  if (req.method === "GET" && path === "/admin/usage") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const days = Math.min(60, Number(url.searchParams.get("days") || 7));
+    const rows = getUsage(days).map((u) => ({ ...u, usd: +estimateCost(u).toFixed(3) }));
+    const total = +rows.reduce((s, r) => s + r.usd, 0).toFixed(2);
+    return send(res, 200, { model: activeModel(), days, totalUsd: total, rows, prices: PRICES });
+  }
+
   // רשימת אישורי/ביטולי הגעה (יום פתוח): ?since=<ms|ISO|hours> (ברירת מחדל 72 שעות), &format=csv לקובץ
   if (req.method === "GET" && path === "/admin/attendance") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
@@ -717,6 +731,13 @@ const server = http.createServer(async (req, res) => {
     if (body.alertPhone) {
       setAlertPhone(normalizePhone(body.alertPhone));
       updated.push("alertPhone");
+    }
+    // החלפת מודל בזמן ריצה: {model:"claude-haiku-5-5"}; {model:""} חוזר ל-BOT_MODEL
+    if ("model" in body) {
+      if (body.model && !PRICES[body.model]) return send(res, 400, { error: "מודל לא מוכר", known: Object.keys(PRICES) });
+      setRuntimeModel(body.model || "");
+      updated.push(`model=${activeModel()}`);
+      console.log(`🧠 מודל הוחלף → ${activeModel()}`);
     }
     if (body.servicePhone) {
       setServicePhone(normalizePhone(body.servicePhone));
