@@ -351,7 +351,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && path === "/health") {
     return send(res, 200, {
       ok: true,
-      model: config.model,
+      model: activeModel(),
       mode: activeAnthropicKey() ? "live" : "mock",
       whatsapp: config.whatsapp.phoneNumberId ? "connected" : "not-configured",
     });
