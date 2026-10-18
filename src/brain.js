@@ -69,12 +69,29 @@ function isJobSeeker(text, history) {
   return JOB_WORDS.some((w) => t.includes(w));
 }
 
-// זיהוי אישור הגעה (לתזכורות אירועים/יום פתוח) — תשובה קבועה, בלי AI ובלי CRM
-const CONFIRM_RE = /^(אני\s+)?(מאשר|מאשרת|מאשרים)(\s+הגעה)?[!.\s🙂👍❤️]*$|^אישור\s+הגעה[!.\s]*$|^(אני\s+)?(אגיע|מגיע|מגיעה|נגיע|בע"ה\s+אגיע)[!.\s🙂👍❤️]*$/;
-function isAttendanceConfirm(text) {
-  const t = (text || "").trim();
-  return t.length <= 30 && CONFIRM_RE.test(t);
+// זיהוי אישור/ביטול הגעה (תזכורות יום פתוח, כולל כפתורי התבניות: "אישור הגעה", "כן, מגיע/ה", "מאשר/ת הגעה",
+// "מגיע", "לא מגיע/ה", "אגיע בפעם אחרת"). תשובה קבועה, בלי AI. הרשימה נשמרת על הליד (confirmedTs/declinedTs).
+const ATT_TRIM = /^[\s!.,🙂😊👍❤️💜🙏✨]+|[\s!.,🙂😊👍❤️💜🙏✨]+$/g;
+const CONFIRM_RE = /^(כן[,!\s]*)?(אני\s+|אנחנו\s+|בעז"ה\s+|בע"ה\s+|בשמחה\s+)*(מאשר(ת|ים)?(\/ת)?(\s+הגעה)?|אישור\s+הגעה|אגיע|מגיע(ה|ים)?(\/ה)?|נגיע|באה?|אהיה(\s+שם)?|נתראה(\s+שם)?|אני\s+רוצה\s+להגיע|שומרים\s+מקום|בשמחה|בטח|כן)(\s+(בעז"ה|בע"ה|בשמחה|מחר|היום|בערב|שם))*$/;
+const DECLINE_RE = /^(לצערי[,\s]*)?(לא\s*(מגיע(ה|ים)?(\/ה)?|אגיע|נגיע|אוכל|יכול(ה)?|אצליח|מתאים(\s+לי)?|הפעם)|אגיע\s+בפעם\s+אחרת|בפעם\s+אחרת|לא)(\s+(הפעם|מחר|היום|לצערי|תודה))*$/;
+// "כן"/"לא"/"בטח"/"בשמחה" לבד הם אישור הגעה רק כשההודעה הקודמת של נועה הייתה תבנית/תזכורת של אירוע
+// (או שאין היסטוריה בכלל — תפוצה שנשלחה מ-WizUp). אחרת "כן" הוא תשובה לשאלה של נועה ("שאתאם לך שיחה?").
+const GENERIC_RE = /^(כן|לא|בטח|בשמחה|לצערי לא|כן בשמחה|כן בטח)$/;
+const EVENT_CTX_RE = /openday|open_day|open_confirm|arrive|confirm|יום פתוח|הגעה|תזכורת|מפגש/i;
+export function detectAttendance(text, history = []) {
+  const t = (text || "").replace(ATT_TRIM, "").trim();
+  if (!t || t.length > 40) return null;
+  if (GENERIC_RE.test(t)) {
+    const lastBot = [...(history || [])].reverse().find((m) => m.role === "assistant")?.content || "";
+    const eventContext = !lastBot || (lastBot.startsWith("[") && EVENT_CTX_RE.test(lastBot));
+    if (!eventContext) return null;
+  }
+  if (DECLINE_RE.test(t)) return "no";
+  if (CONFIRM_RE.test(t)) return "yes";
+  return null;
 }
+const CONFIRM_REPLY = "תודה! רשמנו את אישור ההגעה, נתראה ביום הפתוח 🙂";
+const DECLINE_REPLY = "תודה שעדכנת 🙂 נשמח לראותך בפעם הבאה.";
 
 /**
  * @param {object} lead - { name, persona, score, ... }
@@ -93,16 +110,17 @@ function humanizeDashes(text) {
 }
 
 export async function handleMessage(lead, history, incoming, askFn = askClaude, opts = {}) {
-  // גרדרייל 0: אישור הגעה לאירוע — תשובה קבועה, בלי מודל ובלי שום כתיבה ל-CRM
-  if (isAttendanceConfirm(incoming)) {
+  // גרדרייל 0: אישור/ביטול הגעה לאירוע — תשובה קבועה, בלי מודל (הרשימה נשמרת ב-server על הליד)
+  const attendance = detectAttendance(incoming, history);
+  if (attendance) {
     return {
-      reply: "תודה! נתראה מחר 🙂",
+      reply: attendance === "yes" ? CONFIRM_REPLY : DECLINE_REPLY,
       persona: lead.persona || "unknown",
       intent: "smalltalk",
       score_delta: 0,
       handoff: false,
       handoff_reason: "",
-      _guardrail: "event_confirm",
+      _guardrail: attendance === "yes" ? "event_confirm" : "event_decline",
     };
   }
 

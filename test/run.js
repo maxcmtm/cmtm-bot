@@ -2,7 +2,7 @@
 //   - בלי ANTHROPIC_API_KEY: מצב MOCK — בודק את הגרדריילים הדטרמיניסטיים בלבד.
 //   - עם מפתח: מצב LIVE — בודק גם את התנהגות המודל האמיתי מול תרחישים.
 import { config } from "../src/config.js";
-import { handleMessage, humanizeTone } from "../src/brain.js";
+import { handleMessage, humanizeTone, detectAttendance } from "../src/brain.js";
 import { askClaude } from "../src/claude.js";
 import { matchAutomation } from "../src/automation-skip.js";
 import { parseIncoming } from "../src/whatsapp.js";
@@ -107,6 +107,25 @@ console.log("גרדריילים דטרמיניסטיים:");
   ];
   const bad = cases.filter(([t, exp, h]) => m(t, h) !== exp).map(([t, exp, h]) => `"${t}" → ${m(t, h)} (צפוי ${exp})`);
   check(`דילוג לאוטומציות n8n: ${cases.length} מקרים`, bad.length === 0, bad.join(" | "));
+}
+{
+  // אישור/ביטול הגעה ליום פתוח: כפתורי התבניות + ניסוחים חופשיים קצרים; "כן"/"לא" לבד רק בהקשר של תזכורת
+  const evt = [{ role: "assistant", content: "[נשלחה תבנית שירות openday_1910_invite]" }];
+  const chat = [{ role: "user", content: "מה המסלולים?" }, { role: "assistant", content: "יש כמה. רוצה שאתאם לך שיחה עם יועצת?" }];
+  const cases = [
+    ["אישור הגעה", "yes", []], ["כן, מגיע/ה", "yes", []], ["מאשר/ת הגעה", "yes", []], ["מאשרת הגעה!", "yes", []], ["מגיע", "yes", []],
+    ["אני מגיעה 🙂", "yes", []], ["נגיע בעז\"ה", "yes", []], ["אהיה שם", "yes", []], ["אני רוצה להגיע", "yes", []],
+    ["לא מגיע/ה", "no", []], ["לא אגיע", "no", []], ["אגיע בפעם אחרת", "no", []], ["לצערי לא אוכל", "no", []], ["לא מתאים לי הפעם", "no", []],
+    ["כן", "yes", []], ["כן", "yes", evt], ["לא", "no", evt], ["בטח", "yes", evt],
+    ["כן", null, chat], ["לא", null, chat], ["בשמחה", null, chat],
+    ["מגיעה עם חברה, יש מקום?", null, []], ["כמה עולה שנה א'?", null, []], ["אני מגיע מירושלים, כמה זמן נסיעה?", null, []],
+  ];
+  const bad = cases.filter(([t, exp, h]) => detectAttendance(t, h) !== exp).map(([t, exp, h]) => `"${t}" → ${detectAttendance(t, h)} (צפוי ${exp})`);
+  check(`אישור הגעה: ${cases.length} מקרים`, bad.length === 0, bad.join(" | "));
+  const r = await handleMessage(lead, [], "אישור הגעה", ask);
+  check("אישור הגעה: תשובה קבועה בלי מודל", r._guardrail === "event_confirm" && r.reply.includes("נתראה"), r.reply);
+  const r2 = await handleMessage(lead, [], "לא מגיע/ה", ask);
+  check("ביטול הגעה: תשובה קבועה בלי מודל", r2._guardrail === "event_decline", r2.reply);
 }
 {
   // ניקוי טון דטרמיניסטי: הבטחות זמן, מספר ישן, שם פרטי חוזר

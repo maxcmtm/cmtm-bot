@@ -249,8 +249,16 @@ async function processWhatsApp(msg) {
     }
   }
 
-  // אישור הגעה לאירוע — מעדכנים רק את רשומת "הרשמה לשיעור התנסות" (לא נוגעים בליד עצמו)
+  // ביטול הגעה — נרשם על הליד לרשימת ההגעה, בלי CRM
+  if (decision._guardrail === "event_decline") {
+    updateLead(msg.from, { declinedTs: Date.now(), confirmedTs: 0, attendanceText: (msg.text || "").slice(0, 60) });
+    console.log(`🚫 ביטול הגעה: ${msg.name || msg.from}`);
+    return;
+  }
+  // אישור הגעה לאירוע — נרשם על הליד (רשימה ב-/admin/attendance) + רשומת "הרשמה לשיעור התנסות" ב-CRM
   if (decision._guardrail === "event_confirm") {
+    updateLead(msg.from, { confirmedTs: Date.now(), declinedTs: 0, attendanceText: (msg.text || "").slice(0, 60) });
+    console.log(`✅ אישור הגעה: ${msg.name || msg.from}`);
     confirmTrialAttendance(msg.from)
       .then((r) => { if (!r.ok) console.log(`⚠️ אישור הגעה לא עודכן ב-CRM (${msg.from}): ${r.reason}`); })
       .catch((e) => console.error("[confirm]", e.message));
@@ -461,6 +469,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // רשימת אישורי/ביטולי הגעה (יום פתוח): ?since=<ms|ISO|hours> (ברירת מחדל 72 שעות), &format=csv לקובץ
+  if (req.method === "GET" && path === "/admin/attendance") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const s = url.searchParams.get("since") || "72";
+    const since = /^\d{1,4}$/.test(s) ? Date.now() - Number(s) * 3600000 : /^\d+$/.test(s) ? Number(s) : Date.parse(s);
+    const row = (l, kind, ts) => ({ kind, name: l.name || "", phone: waToIsraeli(l.id), ts, time: new Date(ts).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), text: l.attendanceText || "", status: l.status, fireberryId: l.fireberryId || "" });
+    const confirmed = allLeads().filter((l) => l.confirmedTs && l.confirmedTs >= since).map((l) => row(l, "confirmed", l.confirmedTs)).sort((a, b) => a.ts - b.ts);
+    const declined = allLeads().filter((l) => l.declinedTs && l.declinedTs >= since).map((l) => row(l, "declined", l.declinedTs)).sort((a, b) => a.ts - b.ts);
+    if (url.searchParams.get("format") === "csv") {
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const lines = ["﻿סטטוס,שם,טלפון,זמן,מה כתב/ה", ...[...confirmed, ...declined].map((r) => [r.kind === "confirmed" ? "אישר/ה" : "לא מגיע/ה", r.name, r.phone, r.time, r.text].map(esc).join(","))];
+      res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=attendance.csv" });
+      return res.end(lines.join("\n"));
+    }
+    return send(res, 200, { since: new Date(since).toISOString(), confirmed, declined, totals: { confirmed: confirmed.length, declined: declined.length } });
+  }
+
   // העברת שרת: ייצוא כל המצב (leads.json) / ייבוא לשרת החדש. הייבוא דורס את המצב הקיים.
   if (req.method === "GET" && path === "/admin/export") {
     if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
