@@ -336,6 +336,34 @@ export async function markHotLead(accountId) {
   }
 }
 
+// ===== קמפיין ("אני רוצה להרשם" אחרי תפוצת מבצע) =====
+// שדה "הגיע ממבצע" = pcfsystemfield323 (טקסט חופשי). מאתר/פותח כרטיס, כותב את המקור,
+// מעביר ל"פנייה חוזרת" (תור הנציגים) ומסמן דירוג ליד חם.
+export async function registerCampaignLead({ name, phone, sourceValue }) {
+  if (!token()) return { skipped: true };
+  let accId = await findAccountByPhone(phone);
+  let created = false;
+  if (!accId) {
+    accId = await createAccount(name, phone);
+    created = !!accId;
+  }
+  if (!accId) return { ok: false, reason: "no account" };
+  try {
+    const u = await fetch(`${BASE}/api/record/1/${accId}`, {
+      method: "PUT",
+      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ pcfsystemfield323: sourceValue }),
+    });
+    if (!u.ok) console.error(`[fireberry] הגיע ממבצע נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
+  } catch (e) {
+    console.error("[fireberry] campaign source:", e.message);
+  }
+  if (!created) await touchReturningLead(accId).catch(() => {});
+  await markHotLead(accId).catch(() => {});
+  console.log(`🎯 קמפיין "${sourceValue}": ${name || phone} → כרטיס ${accId}${created ? " (חדש)" : ""}`);
+  return { ok: true, accountId: accId, created };
+}
+
 // אישור הגעה לשיעור התנסות: מאתר את רשומת "הרשמה לשיעור התנסות" (1008) האחרונה
 // של הליד ומעדכן סטטוס (pcfsystemfield104) ל"אישר הגעה טלפונית" (2)
 export async function confirmTrialAttendance(phone) {

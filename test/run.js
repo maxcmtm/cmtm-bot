@@ -2,7 +2,7 @@
 //   - בלי ANTHROPIC_API_KEY: מצב MOCK — בודק את הגרדריילים הדטרמיניסטיים בלבד.
 //   - עם מפתח: מצב LIVE — בודק גם את התנהגות המודל האמיתי מול תרחישים.
 import { config } from "../src/config.js";
-import { handleMessage, humanizeTone, detectAttendance } from "../src/brain.js";
+import { handleMessage, humanizeTone, detectAttendance, detectRegistration } from "../src/brain.js";
 import { askClaude } from "../src/claude.js";
 import { matchAutomation } from "../src/automation-skip.js";
 import { parseIncoming } from "../src/whatsapp.js";
@@ -126,6 +126,18 @@ console.log("גרדריילים דטרמיניסטיים:");
   check("אישור הגעה: תשובה קבועה בלי מודל", r._guardrail === "event_confirm" && r.reply.includes("נתראה"), r.reply);
   const r2 = await handleMessage(lead, [], "לא מגיע/ה", ask);
   check("ביטול הגעה: תשובה קבועה בלי מודל", r2._guardrail === "event_decline", r2.reply);
+}
+{
+  // קמפיין "אני רוצה להרשם": כפתור/משפט קצר = רישום; שאלות ועבר = לנועה
+  const yes=["אני רוצה להרשם","אני רוצה להירשם","רוצה להרשם","מעוניינת להירשם","אשמח להירשם","להרשם","הרשמה","אני רוצה להצטרף","בא לי להתחיל 🙂","מעוניין להרשם בבקשה"];
+  const no=["איך נרשמים?","כמה עולה ההרשמה","נרשמתי כבר","לא מעוניינת להירשם","מה כולל המבצע?","אני רוצה להרשם אבל יש לי שאלה לפני, מה הפריסה של התשלומים ואיזה ימים?"];
+  const bad=[...yes.filter((t)=>!detectRegistration(t)).map((t)=>"✗ "+t), ...no.filter((t)=>detectRegistration(t)).map((t)=>"✓? "+t)];
+  check("קמפיין: זיהוי 'רוצה להרשם'", bad.length===0, bad.join(" | "));
+  const camp={name:"מבצע 500",sourceValue:"רוצה להרשם 500",reply:"מעולה! רשמנו אותך 🙂"};
+  const r=await handleMessage(lead, [], "אני רוצה להרשם", ask, {campaign:camp});
+  check("קמפיין: גארדרייל בלי מודל, handoff, intent", r._guardrail==="campaign_register" && r.handoff===true && r.intent==="buying_signal" && r.reply==="מעולה! רשמנו אותך 🙂", JSON.stringify(r));
+  const r2=await handleMessage(lead, [], "אני רוצה להרשם", ask, {});
+  check("בלי קמפיין: אין גארדרייל", r2._guardrail!=="campaign_register");
 }
 {
   // ניקוי טון דטרמיניסטי: הבטחות זמן, מספר ישן, שם פרטי חוזר

@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, estimateCost, PRICES } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
 import {
   getLastAlert,
@@ -48,6 +48,8 @@ import {
   setRuntimeModel,
   getUsage,
   setRuntimeAnthropicKey,
+  getCampaign,
+  setCampaign,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -166,8 +168,11 @@ async function processWhatsApp(msg) {
   try {
     // למודל נשלחות רק 16 ההודעות האחרונות; ההיסטוריה המלאה נשמרת לתצוגה
     const studentInfo = studentCode ? await getStudentInfo(msg.from).catch(() => "") : "";
-    decision = await handleMessage(lead, history.slice(-16), msg.text, undefined,
-      studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה", studentInfo } : {});
+    const campaign = getCampaign();
+    decision = await handleMessage(lead, history.slice(-16), msg.text, undefined, {
+      ...(studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה", studentInfo } : {}),
+      ...(campaign ? { campaign } : {}),
+    });
   } catch (err) {
     // גם אחרי ניסיונות חוזרים נכשל — ההודעה נכנסת לתור ניסיון-חוזר אוטומטי (retryPending כל 10 דק')
     console.error(`❌ עיבוד נכשל ל-${msg.from}:`, err.message);
@@ -252,6 +257,23 @@ async function processWhatsApp(msg) {
     }
   }
 
+  // קמפיין: "אני רוצה להרשם" → כרטיס ב-CRM עם "הגיע ממבצע", פנייה חוזרת, ליד חם, התראה לסמדר
+  if (decision._guardrail === "campaign_register") {
+    const camp = getCampaign() || {};
+    updateLead(msg.from, { campaignTs: Date.now(), campaignName: camp.name || "", status: "hot" });
+    console.log(`🎯 ${msg.name || msg.from} רוצה להירשם (${camp.name})`);
+    registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: camp.sourceValue || camp.name || "מבצע" })
+      .then((r) => { if (r?.accountId) updateLead(msg.from, { fireberryId: r.accountId }); })
+      .catch((e) => console.error("[campaign]", e.message));
+    if (getAlertPhone()) {
+      sendTemplate(getAlertPhone(), "hot_lead_alert", [
+        `🎯 ${msg.name || l.name || "ללא שם"}`,
+        waToIsraeli(msg.from),
+        `${camp.name || "מבצע"}: לחץ/ה "אני רוצה להרשם" — לסגור היום`.slice(0, 120),
+      ]).catch(() => {});
+    }
+    return;
+  }
   // ביטול הגעה — נרשם על הליד לרשימת ההגעה, בלי CRM
   if (decision._guardrail === "event_decline") {
     updateLead(msg.from, { declinedTs: Date.now(), confirmedTs: 0, attendanceText: (msg.text || "").slice(0, 60) });
@@ -475,6 +497,29 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // מצב קמפיין: GET = מצב + רשימת הנרשמים (&format=csv); POST {active,name,sourceValue,reply,hours}
+  if (path === "/admin/campaign" && (req.method === "GET" || req.method === "POST")) {
+    let body = {};
+    if (req.method === "POST") { try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "bad json" }); } }
+    const secret = req.method === "GET" ? url.searchParams.get("secret") : body.secret;
+    if (secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    if (req.method === "POST") {
+      if (body.active === false) setCampaign(null);
+      else setCampaign({ active: true, name: body.name || "מבצע", sourceValue: body.sourceValue || body.name || "מבצע", reply: body.reply || "", startedTs: Date.now(), until: body.hours ? Date.now() + Number(body.hours) * 3600000 : 0 });
+      console.log(`🎯 קמפיין: ${JSON.stringify(getCampaign())}`);
+    }
+    const since = Number(url.searchParams.get("since") || 0) || (getCampaign()?.startedTs || Date.now() - 48 * 3600000);
+    const rows = allLeads().filter((lx) => lx.campaignTs && lx.campaignTs >= since)
+      .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, fireberryId: lx.fireberryId || "", status: lx.status }))
+      .sort((a, b) => a.time.localeCompare(b.time));
+    if (url.searchParams.get("format") === "csv") {
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=campaign.csv" });
+      return res.end(["\uFEFFשם,טלפון,זמן,קמפיין,כרטיס CRM", ...rows.map((r) => [r.name, r.phone, r.time, r.campaign, r.fireberryId].map(esc).join(","))].join("\n"));
+    }
+    return send(res, 200, { campaign: getCampaign(), total: rows.length, rows });
+  }
+
   // סימון ידני ברשימת ההגעה: {phone, kind: "confirmed"|"declined"|"clear", text?}
   if (req.method === "POST" && path === "/admin/attendance") {
     let body;

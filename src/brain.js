@@ -109,7 +109,31 @@ function humanizeDashes(text) {
   return text;
 }
 
+// רישום בקמפיין ("אני רוצה להרשם" אחרי תפוצת מבצע): כפתור או משפט קצר שמביע רצון להירשם.
+// לא "איך נרשמים?" (שאלה) ולא "נרשמתי כבר" (עבר) — אלה לנועה.
+const REGISTER_RE = /(רוצה|מעוניין|מעוניינת|מעוניינים|מעונין|מעונינת|אשמח|בא לי|אני בפנים|מוכן|מוכנה|מוכנים)\s*(ל|לה)?(הרשם|הירשם|הירשמ|הרשמה|להצטרף|להתחיל)|^(ל|לה)?(הרשם|הירשם|הרשמה)(\s+בבקשה)?$|^אני רוצה להרשם/;
+export function detectRegistration(text) {
+  const t = (text || "").replace(ATT_TRIM, "").trim();
+  if (!t || t.length > 60 || t.includes("?")) return false;
+  if (/^(איך|מה|כמה|מתי|האם)/.test(t)) return false; // שאלות
+  if (/נרשמתי|כבר רשומ|לא רוצה|לא מעוניינ/.test(t)) return false;
+  return REGISTER_RE.test(t);
+}
+
 export async function handleMessage(lead, history, incoming, askFn = askClaude, opts = {}) {
+  // גרדרייל קמפיין: מצב מבצע פעיל + "אני רוצה להרשם" → תשובה קבועה, ליד חם, רישום ב-CRM (ב-server)
+  if (opts.campaign && detectRegistration(incoming)) {
+    return {
+      reply: opts.campaign.reply || "מעולה! רשמנו אותך להטבה 🙂 יועצת לימודים תחזור אליך בהקדם לסיום ההרשמה.",
+      persona: lead.persona || "unknown",
+      intent: "buying_signal",
+      score_delta: 40,
+      handoff: true,
+      handoff_reason: `${opts.campaign.name}: רוצה להירשם`,
+      lead_summary: `ענה/תה לתפוצת "${opts.campaign.name}" שרוצה להירשם.`,
+      _guardrail: "campaign_register",
+    };
+  }
   // גרדרייל 0: אישור/ביטול הגעה לאירוע — תשובה קבועה, בלי מודל (הרשימה נשמרת ב-server על הליד)
   const attendance = detectAttendance(incoming, history);
   if (attendance) {

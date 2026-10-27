@@ -59,6 +59,19 @@ export function setLastAlert(key) {
   save();
 }
 
+// מצב קמפיין: תפוצת מבצע שבה "אני רוצה להרשם" = רישום ל-CRM עם מקור + ליד חם + התראה
+// {active, name, sourceValue, reply, until}
+export function getCampaign() {
+  const c = state.runtime?.campaign || null;
+  if (!c || !c.active) return null;
+  if (c.until && Date.now() > c.until) return null;
+  return c;
+}
+export function setCampaign(c) {
+  state.runtime.campaign = c || null;
+  save();
+}
+
 // מפתח Anthropic בזמן ריצה (גובר על ANTHROPIC_API_KEY) — לרוטציית מפתח בלי לגעת ב-Render: POST /admin/token {anthropicKey}
 export function getRuntimeAnthropicKey() {
   return state.runtime?.anthropicKey || "";
@@ -271,7 +284,7 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText", "campaignTs", "campaignName"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();
