@@ -10,7 +10,7 @@ import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, estimateCost, PRICES } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio } from "./whatsapp.js";
+import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
   getLastAlert,
   setLastAlert,
@@ -364,6 +364,36 @@ export async function retryPending() {
 setInterval(() => retryPending().catch((e) => console.error("[retry]", e.message)), 10 * 60 * 1000);
 setTimeout(() => retryPending().catch((e) => console.error("[retry]", e.message)), 45 * 1000); // גם אחרי כל עלייה (פריסה = ריסטארט)
 
+// ===== תפוצה המונית (רצה ברקע, ניתנת לעצירה) =====
+let bc = { running: false, label: "", template: "", total: 0, sent: 0, failed: 0, startedTs: 0, finishedTs: 0, stop: false, lastError: "" };
+function broadcastState() { return { ...bc, stop: undefined }; }
+function stopBroadcast() { if (bc.running) bc.stop = true; }
+function startBroadcast({ template, params, list, spacingMs, label, quality }) {
+  bc = { running: true, label, template, total: list.length, sent: 0, failed: 0, startedTs: Date.now(), finishedTs: 0, stop: false, lastError: "", quality };
+  (async () => {
+    for (const t of list) {
+      if (bc.stop) break;
+      try {
+        // פרמטר {{1}} = שם פרטי אם התבנית דורשת ואין ערך מפורש
+        const p = (params || []).map((x) => (x === "{{name}}" ? ((t.name || "").split(/\s+/)[0] || "מתעניין") : x));
+        const r = await sendTemplate(t.phone, template, p);
+        if (r.ok || r.dryRun) {
+          bc.sent++;
+          pushAssistantTurn(t.phone, `[נשלחה תבנית ${template}${label !== template ? " — " + label : ""}]`);
+          logSend({ kind: "template", template, phone: t.phone, name: t.name, ok: true, status: 200, source: "broadcast" });
+        } else {
+          bc.failed++; bc.lastError = `status ${r.status}`;
+          logSend({ kind: "template", template, phone: t.phone, name: t.name, ok: false, status: r.status || 0, source: "broadcast" });
+        }
+      } catch (e) { bc.failed++; bc.lastError = e.message; }
+      await new Promise((r) => setTimeout(r, spacingMs));
+    }
+    bc.running = false; bc.finishedTs = Date.now();
+    console.log(`📣 תפוצה "${label}" הסתיימה: ${bc.sent} נשלחו, ${bc.failed} נכשלו${bc.stop ? " (נעצרה)" : ""}`);
+    alertAdmin("broadcast_done", `📣 תפוצה "${label}": ${bc.sent} נשלחו, ${bc.failed} נכשלו${bc.stop ? " (נעצרה ידנית)" : ""}.`, 0).catch(() => {});
+  })();
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${config.port}`);
   const path = url.pathname;
@@ -497,6 +527,44 @@ const server = http.createServer(async (req, res) => {
   }
 
   // רשימת תבניות שירות מאושרות (לדאשבורד) — UTILITY בלבד
+  // תפוצה המונית מנועה: POST /admin/broadcast {secret, template, phones:[...] | audience:{days,statuses}, params:[], name, spacingMs, dryRun}
+  // מסנן מוסרים/תלמידים/כפולים, שולח ברקע בקצב מבוקר, רושם בהיסטוריה ובסקר השליחות. GET = התקדמות. POST {stop:true} = עצירה.
+  if (path === "/admin/broadcast" && (req.method === "GET" || req.method === "POST")) {
+    let body = {};
+    if (req.method === "POST") { try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "bad json" }); } }
+    const secret = req.method === "GET" ? url.searchParams.get("secret") : body.secret;
+    if (secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    if (req.method === "GET") return send(res, 200, broadcastState());
+    if (body.stop) { stopBroadcast(); return send(res, 200, { stopped: true, ...broadcastState() }); }
+    if (!body.template) return send(res, 400, { error: "template" });
+    if (broadcastState().running) return send(res, 409, { error: "תפוצה כבר רצה", ...broadcastState() });
+    const quality = await getNumberQuality();
+    if (quality === "RED") return send(res, 423, { error: "דירוג המספר RED — לא שולחים תפוצה" });
+    // קהל: רשימת טלפונים מפורשת, או מהמאגר של נועה לפי ימים אחרונים וסטטוסים
+    let targets = [];
+    if (Array.isArray(body.phones) && body.phones.length) {
+      targets = body.phones.map((x) => (typeof x === "string" ? { phone: normalizePhone(x), name: "" } : { phone: normalizePhone(x.phone || ""), name: x.name || "" }));
+    } else if (body.audience) {
+      const days = Number(body.audience.days || 90), statuses = body.audience.statuses || ["active_chat", "hot", "in_sequence", "cold"];
+      const since = Date.now() - days * 86400000;
+      targets = allLeads().filter((lx) => statuses.includes(lx.status) && Math.max(lx.lastInboundTs || 0, lx.lastDripTs || 0, lx.createdTs || 0) >= since).map((lx) => ({ phone: lx.id, name: lx.name || "" }));
+    } else return send(res, 400, { error: "phones או audience" });
+    const seen = new Set(); const skipped = { invalid: 0, duplicate: 0, unsubscribed: 0, student: 0 };
+    const list = [];
+    for (const t of targets) {
+      if (!t.phone || t.phone.length < 11 || t.phone.length > 13) { skipped.invalid++; continue; }
+      if (seen.has(t.phone)) { skipped.duplicate++; continue; }
+      seen.add(t.phone);
+      const lx = allLeads().find((y) => y.id === t.phone);
+      if (lx?.status === "unsubscribed") { skipped.unsubscribed++; continue; }
+      if (lx?.status === "student" || studentStatus(t.phone)) { skipped.student++; continue; }
+      list.push({ phone: t.phone, name: t.name || lx?.name || "" });
+    }
+    if (body.dryRun) return send(res, 200, { dryRun: true, template: body.template, quality, wouldSend: list.length, skipped, sample: list.slice(0, 5) });
+    startBroadcast({ template: body.template, params: body.params || [], list, spacingMs: Number(body.spacingMs || 1500), label: body.name || body.template, quality });
+    return send(res, 202, { started: true, template: body.template, quality, total: list.length, skipped });
+  }
+
   // מצב קמפיין: GET = מצב + רשימת הנרשמים (&format=csv); POST {active,name,sourceValue,reply,hours}
   if (path === "/admin/campaign" && (req.method === "GET" || req.method === "POST")) {
     let body = {};
