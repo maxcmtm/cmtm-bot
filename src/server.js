@@ -551,11 +551,12 @@ const server = http.createServer(async (req, res) => {
     } else return send(res, 400, { error: "phones או audience" });
     const seen = new Set(); const skipped = { invalid: 0, duplicate: 0, unsubscribed: 0, student: 0 };
     const list = [];
+    const byId = new Map(allLeads().map((y) => [y.id, y])); // חיפוש O(1) — 5,800 נמענים × 7,000 לידים
     for (const t of targets) {
       if (!t.phone || t.phone.length < 11 || t.phone.length > 13) { skipped.invalid++; continue; }
       if (seen.has(t.phone)) { skipped.duplicate++; continue; }
       seen.add(t.phone);
-      const lx = allLeads().find((y) => y.id === t.phone);
+      const lx = byId.get(t.phone);
       if (lx?.status === "unsubscribed") { skipped.unsubscribed++; continue; }
       if (lx?.status === "student" || studentStatus(t.phone)) { skipped.student++; continue; }
       list.push({ phone: t.phone, name: t.name || lx?.name || "" });
