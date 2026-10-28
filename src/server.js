@@ -558,7 +558,7 @@ const server = http.createServer(async (req, res) => {
       seen.add(t.phone);
       const lx = byId.get(t.phone);
       if (lx?.status === "unsubscribed") { skipped.unsubscribed++; continue; }
-      if (lx?.status === "student" || studentStatus(t.phone)) { skipped.student++; continue; }
+      if (!body.includeStudents && (lx?.status === "student" || studentStatus(t.phone))) { skipped.student++; continue; } // תפוצה לתלמידים (שלב ב') עוברת עם includeStudents:true
       list.push({ phone: t.phone, name: t.name || lx?.name || "" });
     }
     if (body.dryRun) return send(res, 200, { dryRun: true, template: body.template, quality, wouldSend: list.length, skipped, sample: list.slice(0, 5) });
