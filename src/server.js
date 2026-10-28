@@ -368,14 +368,14 @@ setTimeout(() => retryPending().catch((e) => console.error("[retry]", e.message)
 let bc = { running: false, label: "", template: "", total: 0, sent: 0, failed: 0, startedTs: 0, finishedTs: 0, stop: false, lastError: "" };
 function broadcastState() { return { ...bc, stop: undefined }; }
 function stopBroadcast() { if (bc.running) bc.stop = true; }
-function startBroadcast({ template, params, list, spacingMs, label, quality }) {
+function startBroadcast({ template, params, list, spacingMs, label, quality, nameFallback = "יקר/ה" }) {
   bc = { running: true, label, template, total: list.length, sent: 0, failed: 0, startedTs: Date.now(), finishedTs: 0, stop: false, lastError: "", quality };
   (async () => {
     for (const t of list) {
       if (bc.stop) break;
       try {
         // פרמטר {{1}} = שם פרטי אם התבנית דורשת ואין ערך מפורש
-        const p = (params || []).map((x) => (x === "{{name}}" ? ((t.name || "").split(/\s+/)[0] || "מתעניין") : x));
+        const p = (params || []).map((x) => (x === "{{name}}" ? ((t.name || "").split(/\s+/)[0] || nameFallback) : x));
         const r = await sendTemplate(t.phone, template, p);
         if (r.ok || r.dryRun) {
           bc.sent++;
@@ -562,7 +562,7 @@ const server = http.createServer(async (req, res) => {
       list.push({ phone: t.phone, name: t.name || lx?.name || "" });
     }
     if (body.dryRun) return send(res, 200, { dryRun: true, template: body.template, quality, wouldSend: list.length, skipped, sample: list.slice(0, 5) });
-    startBroadcast({ template: body.template, params: body.params || [], list, spacingMs: Number(body.spacingMs || 1500), label: body.name || body.template, quality });
+    startBroadcast({ template: body.template, params: body.params || [], list, spacingMs: Number(body.spacingMs || 1500), label: body.name || body.template, quality, nameFallback: body.nameFallback || "יקר/ה" });
     return send(res, 202, { started: true, template: body.template, quality, total: list.length, skipped });
   }
 
