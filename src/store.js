@@ -59,6 +59,10 @@ export function setLastAlert(key) {
   save();
 }
 
+// תפוצה המונית: המשימה נשמרת על הדיסק כדי לשרוד ריסטארט/פריסה (ממשיכים מהאינדקס) ולתמוך בתזמון (startAt)
+export function getBroadcastJob() { return state.runtime?.broadcastJob || null; }
+export function setBroadcastJob(j) { state.runtime.broadcastJob = j || null; save(); }
+
 // מצב קמפיין: תפוצת מבצע שבה "אני רוצה להרשם" = רישום ל-CRM עם מקור + ליד חם + התראה
 // {active, name, sourceValue, reply, until}
 export function getCampaign() {

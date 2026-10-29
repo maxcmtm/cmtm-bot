@@ -50,6 +50,8 @@ import {
   setRuntimeAnthropicKey,
   getCampaign,
   setCampaign,
+  getBroadcastJob,
+  setBroadcastJob,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
 import { matchAutomation, automationStatus } from "./automation-skip.js";
@@ -364,17 +366,29 @@ export async function retryPending() {
 setInterval(() => retryPending().catch((e) => console.error("[retry]", e.message)), 10 * 60 * 1000);
 setTimeout(() => retryPending().catch((e) => console.error("[retry]", e.message)), 45 * 1000); // גם אחרי כל עלייה (פריסה = ריסטארט)
 
-// ===== תפוצה המונית (רצה ברקע, ניתנת לעצירה) =====
-let bc = { running: false, label: "", template: "", total: 0, sent: 0, failed: 0, startedTs: 0, finishedTs: 0, stop: false, lastError: "" };
-function broadcastState() { return { ...bc, stop: undefined }; }
-function stopBroadcast() { if (bc.running) bc.stop = true; }
-function startBroadcast({ template, params, list, spacingMs, label, quality, nameFallback = "יקר/ה" }) {
-  bc = { running: true, label, template, total: list.length, sent: 0, failed: 0, startedTs: Date.now(), finishedTs: 0, stop: false, lastError: "", quality };
+// ===== תפוצה המונית (רצה ברקע, ניתנת לעצירה, שורדת ריסטארט, ניתנת לתזמון) =====
+// המשימה (רשימה + אינדקס) נשמרת ב-store; אחרי פריסה/ריסטארט ממשיכים מהמקום שעצרנו.
+let bc = { running: false, label: "", template: "", total: 0, sent: 0, failed: 0, startedTs: 0, finishedTs: 0, stop: false, lastError: "", startAt: 0 };
+function broadcastState() {
+  const job = getBroadcastJob();
+  return { ...bc, stop: undefined, scheduled: job && !job.done && job.startAt > Date.now() ? { label: job.label, startAt: new Date(job.startAt).toISOString(), total: job.list.length } : null };
+}
+function stopBroadcast() { if (bc.running) bc.stop = true; const j = getBroadcastJob(); if (j && !bc.running) setBroadcastJob(null); }
+function startBroadcast({ template, params, list, spacingMs, label, quality, nameFallback = "יקר/ה", startAt = 0 }) {
+  setBroadcastJob({ template, params, list, spacingMs, label, nameFallback, idx: 0, sent: 0, failed: 0, startedTs: Date.now(), startAt: startAt || 0, done: false });
+  if (startAt && startAt > Date.now()) { console.log(`📣 תפוצה "${label}" תוזמנה ל-${new Date(startAt).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" })} (${list.length})`); return; }
+  runBroadcastJob();
+}
+function runBroadcastJob() {
+  const job = getBroadcastJob();
+  if (!job || job.done || bc.running) return;
+  const { template, params, list, spacingMs, label, nameFallback } = job;
+  bc = { running: true, label, template, total: list.length, sent: job.sent || 0, failed: job.failed || 0, startedTs: job.startedTs, finishedTs: 0, stop: false, lastError: "", startAt: job.startAt || 0 };
   (async () => {
-    for (const t of list) {
+    for (let i = job.idx || 0; i < list.length; i++) {
       if (bc.stop) break;
+      const t = list[i];
       try {
-        // פרמטר {{1}} = שם פרטי אם התבנית דורשת ואין ערך מפורש
         const p = (params || []).map((x) => (x === "{{name}}" ? ((t.name || "").split(/\s+/)[0] || nameFallback) : x));
         const r = await sendTemplate(t.phone, template, p);
         if (r.ok || r.dryRun) {
@@ -386,13 +400,24 @@ function startBroadcast({ template, params, list, spacingMs, label, quality, nam
           logSend({ kind: "template", template, phone: t.phone, name: t.name, ok: false, status: r.status || 0, source: "broadcast" });
         }
       } catch (e) { bc.failed++; bc.lastError = e.message; }
+      if (i % 10 === 0) { const j = getBroadcastJob(); if (j) setBroadcastJob({ ...j, idx: i + 1, sent: bc.sent, failed: bc.failed }); }
       await new Promise((r) => setTimeout(r, spacingMs));
     }
     bc.running = false; bc.finishedTs = Date.now();
+    setBroadcastJob(bc.stop ? null : { ...getBroadcastJob(), idx: list.length, sent: bc.sent, failed: bc.failed, done: true, list: [] });
     console.log(`📣 תפוצה "${label}" הסתיימה: ${bc.sent} נשלחו, ${bc.failed} נכשלו${bc.stop ? " (נעצרה)" : ""}`);
     alertAdmin("broadcast_done", `📣 תפוצה "${label}": ${bc.sent} נשלחו, ${bc.failed} נכשלו${bc.stop ? " (נעצרה ידנית)" : ""}.`, 0).catch(() => {});
   })();
 }
+// אחרי עלייה: ממשיכים תפוצה שנקטעה, או מחכים לתפוצה מתוזמנת (בדיקה כל דקה)
+setTimeout(() => {
+  const j = getBroadcastJob();
+  if (j && !j.done && (!j.startAt || j.startAt <= Date.now())) { console.log(`📣 ממשיך תפוצה "${j.label}" מאינדקס ${j.idx}/${j.list.length}`); runBroadcastJob(); }
+}, 30 * 1000);
+setInterval(() => {
+  const j = getBroadcastJob();
+  if (j && !j.done && !bc.running && j.startAt && j.startAt <= Date.now()) runBroadcastJob();
+}, 60 * 1000);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${config.port}`);
@@ -537,7 +562,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET") return send(res, 200, broadcastState());
     if (body.stop) { stopBroadcast(); return send(res, 200, { stopped: true, ...broadcastState() }); }
     if (!body.template) return send(res, 400, { error: "template" });
-    if (broadcastState().running) return send(res, 409, { error: "תפוצה כבר רצה", ...broadcastState() });
+    if (broadcastState().running || broadcastState().scheduled) return send(res, 409, { error: "תפוצה כבר רצה או מתוזמנת", ...broadcastState() });
     const quality = await getNumberQuality();
     if (quality === "RED") return send(res, 423, { error: "דירוג המספר RED — לא שולחים תפוצה" });
     // קהל: רשימת טלפונים מפורשת, או מהמאגר של נועה לפי ימים אחרונים וסטטוסים
@@ -562,8 +587,9 @@ const server = http.createServer(async (req, res) => {
       list.push({ phone: t.phone, name: t.name || lx?.name || "" });
     }
     if (body.dryRun) return send(res, 200, { dryRun: true, template: body.template, quality, wouldSend: list.length, skipped, sample: list.slice(0, 5) });
-    startBroadcast({ template: body.template, params: body.params || [], list, spacingMs: Number(body.spacingMs || 1500), label: body.name || body.template, quality, nameFallback: body.nameFallback || "יקר/ה" });
-    return send(res, 202, { started: true, template: body.template, quality, total: list.length, skipped });
+    const startAt = body.startAt ? Date.parse(body.startAt) : 0;
+    startBroadcast({ template: body.template, params: body.params || [], list, spacingMs: Number(body.spacingMs || 1500), label: body.name || body.template, quality, nameFallback: body.nameFallback || "יקר/ה", startAt });
+    return send(res, 202, { started: !startAt, scheduled: startAt ? new Date(startAt).toISOString() : null, template: body.template, quality, total: list.length, skipped });
   }
 
   // מצב קמפיין: GET = מצב + רשימת הנרשמים (&format=csv); POST {active,name,sourceValue,reply,hours}
