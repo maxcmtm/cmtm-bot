@@ -264,7 +264,7 @@ async function processWhatsApp(msg) {
     const camp = getCampaign() || {};
     updateLead(msg.from, { campaignTs: Date.now(), campaignName: camp.name || "", status: "hot" });
     console.log(`🎯 ${msg.name || msg.from} רוצה להירשם (${camp.name})`);
-    registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: camp.sourceValue || camp.name || "מבצע" })
+    registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: camp.sourceValue || camp.name || "מבצע", ownerId: camp.ownerId || "" })
       .then((r) => { if (r?.accountId) updateLead(msg.from, { fireberryId: r.accountId }); })
       .catch((e) => console.error("[campaign]", e.message));
     if (getAlertPhone()) {
@@ -600,7 +600,7 @@ const server = http.createServer(async (req, res) => {
     if (secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
     if (req.method === "POST") {
       if (body.active === false) setCampaign(null);
-      else setCampaign({ active: true, name: body.name || "מבצע", sourceValue: body.sourceValue || body.name || "מבצע", reply: body.reply || "", startedTs: Date.now(), until: body.hours ? Date.now() + Number(body.hours) * 3600000 : 0 });
+      else setCampaign({ active: true, name: body.name || "מבצע", sourceValue: body.sourceValue || body.name || "מבצע", reply: body.reply || "", ownerId: body.ownerId || "", startedTs: Date.now(), until: body.hours ? Date.now() + Number(body.hours) * 3600000 : 0 });
       console.log(`🎯 קמפיין: ${JSON.stringify(getCampaign())}`);
     }
     const since = Number(url.searchParams.get("since") || 0) || (getCampaign()?.startedTs || Date.now() - 48 * 3600000);

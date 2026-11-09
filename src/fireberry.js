@@ -339,7 +339,8 @@ export async function markHotLead(accountId) {
 // ===== קמפיין ("אני רוצה להרשם" אחרי תפוצת מבצע) =====
 // שדה "הגיע ממבצע" = pcfsystemfield323 (טקסט חופשי). מאתר/פותח כרטיס, כותב את המקור,
 // מעביר ל"פנייה חוזרת" (תור הנציגים) ומסמן דירוג ליד חם.
-export async function registerCampaignLead({ name, phone, sourceValue }) {
+// ownerId (אופציונלי): מעביר את "מנהל לקוח" (ownerid) למשתמש נתון, ושומר את הקודם ב"מנהל לקוח קודם" (pcfsystemfield306)
+export async function registerCampaignLead({ name, phone, sourceValue, ownerId }) {
   if (!token()) return { skipped: true };
   let accId = await findAccountByPhone(phone);
   let created = false;
@@ -349,10 +350,19 @@ export async function registerCampaignLead({ name, phone, sourceValue }) {
   }
   if (!accId) return { ok: false, reason: "no account" };
   try {
+    const fields = { pcfsystemfield323: sourceValue };
+    if (ownerId) {
+      try {
+        const g = await fetch(`${BASE}/api/record/1/${accId}`, { headers: { tokenid: token(), accept: "application/json" } });
+        const prev = g.ok ? (await g.json())?.data?.Record?.ownerid : null;
+        if (prev && prev !== ownerId) fields.pcfsystemfield306 = prev;
+      } catch { /* לא קריטי */ }
+      fields.ownerid = ownerId;
+    }
     const u = await fetch(`${BASE}/api/record/1/${accId}`, {
       method: "PUT",
       headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ pcfsystemfield323: sourceValue }),
+      body: JSON.stringify(fields),
     });
     if (!u.ok) console.error(`[fireberry] הגיע ממבצע נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
   } catch (e) {
