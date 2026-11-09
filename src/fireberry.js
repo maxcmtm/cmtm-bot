@@ -350,21 +350,29 @@ export async function registerCampaignLead({ name, phone, sourceValue, ownerId }
   }
   if (!accId) return { ok: false, reason: "no account" };
   try {
-    const fields = { pcfsystemfield323: sourceValue };
+    const put = async (fields) => {
+      const u = await fetch(`${BASE}/api/record/1/${accId}`, {
+        method: "PUT",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify(fields),
+      });
+      if (!u.ok) console.error(`[fireberry] עדכון ${Object.keys(fields).join(",")} נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
+      return u.ok;
+    };
+    // שלב 1: "הגיע ממבצע" תמיד, לבד (כדי ששדה הסינון יתעדכן גם אם שינוי הבעלים נכשל)
+    await put({ pcfsystemfield323: sourceValue });
+    // שלב 2: העברת "מנהל לקוח" רק אם שונה מהנוכחי, ושמירת הקודם ב"מנהל לקוח קודם"
     if (ownerId) {
+      let prev = null;
       try {
         const g = await fetch(`${BASE}/api/record/1/${accId}`, { headers: { tokenid: token(), accept: "application/json" } });
-        const prev = g.ok ? (await g.json())?.data?.Record?.ownerid : null;
-        if (prev && prev !== ownerId) fields.pcfsystemfield306 = prev;
+        prev = g.ok ? (await g.json())?.data?.Record?.ownerid : null;
       } catch { /* לא קריטי */ }
-      fields.ownerid = ownerId;
+      if (prev !== ownerId) {
+        const ok = await put(prev ? { ownerid: ownerId, pcfsystemfield306: prev } : { ownerid: ownerId });
+        if (!ok) await put({ ownerid: ownerId });
+      }
     }
-    const u = await fetch(`${BASE}/api/record/1/${accId}`, {
-      method: "PUT",
-      headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(fields),
-    });
-    if (!u.ok) console.error(`[fireberry] הגיע ממבצע נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
   } catch (e) {
     console.error("[fireberry] campaign source:", e.message);
   }
