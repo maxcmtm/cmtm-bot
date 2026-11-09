@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, estimateCost, PRICES } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
   getLastAlert,
@@ -428,6 +428,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && path === "/health") {
     return send(res, 200, {
       ok: true,
+      commit: (process.env.RENDER_GIT_COMMIT || "").slice(0, 7),
       model: activeModel(),
       mode: activeAnthropicKey() ? "live" : "mock",
       whatsapp: config.whatsapp.phoneNumberId ? "connected" : "not-configured",
@@ -503,6 +504,7 @@ const server = http.createServer(async (req, res) => {
       drip: { dailyCap: config.drip.dailyCap, runCap: config.drip.runCap, maxSilentStep: config.drip.maxSilentStep, stepDays: config.drip.stepDays },
       pending: getPending().length,
       model: activeModel(),
+      fireberryErrors: fireberryErrors(),
       // צריכה היום לפי מודל + הערכת עלות בדולרים (מחירון ב-claude.js)
       usageToday: getUsage(1).map((u) => ({ ...u, usd: +estimateCost(u).toFixed(3) })),
       studentSet: studentSetSize(),

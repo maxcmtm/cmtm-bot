@@ -8,6 +8,14 @@ function token() {
 }
 
 // 972546641264 -> 0546641264 (פורמט ישראלי כפי שנשמר ב-Fireberry)
+// שגיאות אחרונות מול Fireberry — נחשפות ב-/admin כדי לאבחן בלי לוגים של Render
+const recentErrors = [];
+export function fireberryErrors() { return recentErrors.slice(-20); }
+function noteError(where, status, text) {
+  recentErrors.push({ ts: Date.now(), where, status, text: String(text || "").slice(0, 200) });
+  if (recentErrors.length > 50) recentErrors.shift();
+}
+
 export function waToIsraeli(phone) {
   let p = String(phone || "").replace(/\D/g, "");
   if (p.startsWith("972")) p = "0" + p.slice(3);
@@ -356,7 +364,7 @@ export async function registerCampaignLead({ name, phone, sourceValue, ownerId }
         headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(fields),
       });
-      if (!u.ok) console.error(`[fireberry] עדכון ${Object.keys(fields).join(",")} נכשל ${u.status}: ${(await u.text()).slice(0, 120)}`);
+      if (!u.ok) { const t = await u.text(); console.error(`[fireberry] עדכון ${Object.keys(fields).join(",")} נכשל ${u.status}: ${t.slice(0, 120)}`); noteError("campaign:" + Object.keys(fields).join(","), u.status, t); }
       return u.ok;
     };
     // שלב 1: "הגיע ממבצע" תמיד, לבד (כדי ששדה הסינון יתעדכן גם אם שינוי הבעלים נכשל)
