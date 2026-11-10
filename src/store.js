@@ -85,6 +85,17 @@ export function setRuntimeAnthropicKey(k) {
   save();
 }
 
+// פרוקסי המנוי בזמן ריצה (גובר על LLM_PROXY_*) — POST /admin/token {llmProxy:{url,secret}}
+// {llmProxy:null} מחזיר את נועה ל-API בתשלום.
+export function getRuntimeLlmProxy() {
+  const p = state.runtime?.llmProxy;
+  return p && p.url && p.secret ? p : null;
+}
+export function setRuntimeLlmProxy(p) {
+  state.runtime.llmProxy = p && p.url && p.secret ? { url: p.url, secret: p.secret } : null;
+  save();
+}
+
 // מודל בזמן ריצה (גובר על BOT_MODEL) — להחלפת מודל בלי פריסה: POST /admin/token {model}
 export function getRuntimeModel() {
   return state.runtime?.model || "";

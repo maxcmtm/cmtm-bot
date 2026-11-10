@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
-import { summarizeLead, activeModel, activeAnthropicKey, estimateCost, PRICES } from "./claude.js";
+import { summarizeLead, activeModel, activeAnthropicKey, activeLlmProxy, estimateCost, PRICES } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
@@ -48,6 +48,7 @@ import {
   setRuntimeModel,
   getUsage,
   setRuntimeAnthropicKey,
+  setRuntimeLlmProxy,
   getCampaign,
   setCampaign,
   getBroadcastJob,
@@ -504,6 +505,13 @@ const server = http.createServer(async (req, res) => {
       drip: { dailyCap: config.drip.dailyCap, runCap: config.drip.runCap, maxSilentStep: config.drip.maxSilentStep, stepDays: config.drip.stepDays },
       pending: getPending().length,
       model: activeModel(),
+      // מאיפה יוצאים הטוקנים: "subscription" = מנוי Claude של המכללה דרך
+      // הפרוקסי; "api-key" = מפתח API בתשלום. fallback מציין שיש רשת ביטחון.
+      llm: {
+        route: activeLlmProxy() ? "subscription" : "api-key",
+        proxyUrl: activeLlmProxy()?.url || "",
+        fallback: Boolean(activeLlmProxy() && activeAnthropicKey()),
+      },
       fireberryErrors: fireberryErrors(),
       // צריכה היום לפי מודל + הערכת עלות בדולרים (מחירון ב-claude.js)
       usageToday: getUsage(1).map((u) => ({ ...u, usd: +estimateCost(u).toFixed(3) })),
@@ -898,6 +906,17 @@ const server = http.createServer(async (req, res) => {
       setRuntimeAnthropicKey(body.anthropicKey || "");
       updated.push("anthropicKey");
       console.log("🔑 מפתח Anthropic עודכן בזמן ריצה");
+    }
+    // פרוקסי המנוי של Jarvis: {llmProxy:{url,secret}} → הטוקנים יוצאים מהמנוי
+    // של המכללה ולא ממפתח API בתשלום. {llmProxy:null} חוזר ל-API בתשלום.
+    // ה-API בתשלום נשאר מוגדר ומשמש רשת ביטחון אוטומטית אם הפרוקסי נופל.
+    if ("llmProxy" in body) {
+      const p = body.llmProxy;
+      if (p && !(p.url && p.secret)) return send(res, 400, { error: "llmProxy דורש url וגם secret" });
+      if (p && !/^https:\/\//.test(p.url)) return send(res, 400, { error: "llmProxy.url חייב להיות https" });
+      setRuntimeLlmProxy(p || null);
+      updated.push(`llmProxy=${p ? "on" : "off"}`);
+      console.log(p ? `🔗 פרוקסי מנוי הופעל → ${p.url}` : "🔗 פרוקסי מנוי כובה — חזרה ל-API בתשלום");
     }
     // החלפת מודל בזמן ריצה: {model:"claude-haiku-5-5"}; {model:""} חוזר ל-BOT_MODEL
     if ("model" in body) {

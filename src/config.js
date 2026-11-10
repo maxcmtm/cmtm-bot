@@ -40,6 +40,13 @@ function realKey(k) {
 
 export const config = {
   anthropicKey: realKey(process.env.ANTHROPIC_API_KEY),
+  // פרוקסי המנוי של Jarvis: מגיש את אותו מודל מתוך מנוי Claude של המכללה
+  // במקום ממפתח API בתשלום. אפשר להגדיר גם בזמן ריצה (POST /admin/token
+  // {llmProxy:{url,secret}}) ואז אין צורך לגעת ב-Render.
+  llmProxy: {
+    url: process.env.LLM_PROXY_URL || "",
+    secret: process.env.LLM_PROXY_SECRET || "",
+  },
   model: process.env.BOT_MODEL || "claude-haiku-4-5-20251001",
   port: Number(process.env.PORT || 3000),
   webhookSecret: process.env.WEBHOOK_SECRET || "",

@@ -3,7 +3,8 @@
 //   - עם מפתח: מצב LIVE — בודק גם את התנהגות המודל האמיתי מול תרחישים.
 import { config } from "../src/config.js";
 import { handleMessage, humanizeTone, detectAttendance, detectRegistration } from "../src/brain.js";
-import { askClaude } from "../src/claude.js";
+import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
+import { setRuntimeLlmProxy, setRuntimeAnthropicKey } from "../src/store.js";
 import { matchAutomation } from "../src/automation-skip.js";
 import { parseIncoming } from "../src/whatsapp.js";
 
@@ -182,6 +183,75 @@ console.log("גרדריילים דטרמיניסטיים:");
 {
   const r = await handleMessage({ ...lead }, [], "יש לי ילד עם בעיות קשב", ask);
   check("זיהוי פרסונת הורה", r.persona === "parent", `קיבלנו: ${r.persona}`);
+}
+
+// ---------- מסלול הקריאה: מנוי → API בתשלום ----------
+// נועה מוגשת מתוך מנוי Claude של המכללה דרך פרוקסי אצלנו, וה-API בתשלום
+// נשאר רשת ביטחון. הבדיקות כאן מאמתות את הסדר ואת הנפילה-אחורה בלי רשת.
+console.log("\nמסלול הקריאה למודל:");
+{
+  const realFetch = global.fetch;
+  const PROXY = { url: "https://example.test/nova-llm/v1/messages", secret: "s3cr3t" };
+  const okBody = { model: "claude-haiku-5-5", usage: {}, content: [] };
+  const reply = (status, body) => ({
+    ok: status === 200,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  });
+
+  check("בלי הגדרה אין פרוקסי", activeLlmProxy() === null);
+
+  setRuntimeLlmProxy(PROXY);
+  check("פרוקסי בזמן ריצה נקלט", activeLlmProxy()?.url === PROXY.url);
+
+  // חצי-הגדרה (בלי secret) נדחית — אחרת היינו שולחים קריאה בלי אימות
+  setRuntimeLlmProxy({ url: PROXY.url });
+  check("חצי הגדרה נדחית", activeLlmProxy() === null);
+  setRuntimeLlmProxy(PROXY);
+
+  {
+    const seen = [];
+    global.fetch = async (url, opts) => {
+      seen.push({ url, secret: opts.headers["x-proxy-secret"], key: opts.headers["x-api-key"] });
+      return reply(200, okBody);
+    };
+    const r = await callMessages({ model: "m", messages: [] });
+    check("קריאה הולכת למנוי", r.via === "subscription" && seen.length === 1, JSON.stringify(seen));
+    check("נשלח הסוד ולא המפתח", seen[0].secret === PROXY.secret && !seen[0].key);
+  }
+
+  // רשת הביטחון נבדקת מול מפתח דמה, כדי שהבדיקה תעבוד גם במצב MOCK
+  // (שבו אין ANTHROPIC_API_KEY אמיתי בסביבה).
+  setRuntimeAnthropicKey("sk-ant-dummy-for-routing-test-0000");
+
+  {
+    // הפרוקסי מחזיר 401 (סוד שגוי) — שגיאה קבועה, ולכן מעבר מיידי ל-API בתשלום
+    const seen = [];
+    global.fetch = async (url, opts) => {
+      seen.push(url);
+      return url === PROXY.url
+        ? reply(401, { error: "bad proxy secret" })
+        : reply(200, okBody);
+    };
+    const r = await callMessages({ model: "m", messages: [] });
+    check("נפילה-אחורה ל-API בתשלום", r.via === "api-key", `via=${r.via}`);
+    check("לא נותר ליד בלי מענה", seen.length === 2 && seen[1].includes("api.anthropic.com"),
+      JSON.stringify(seen));
+  }
+
+  {
+    // שני המסלולים מתים → שגיאה אמיתית, לא תשובה שקרית
+    global.fetch = async () => reply(401, { error: "nope" });
+    let threw = false;
+    try { await callMessages({ model: "m", messages: [] }); } catch { threw = true; }
+    check("שני מסלולים מתים → זורק", threw);
+  }
+
+  setRuntimeLlmProxy(null);
+  check("כיבוי פרוקסי מחזיר ל-API בתשלום", activeLlmProxy() === null);
+  setRuntimeAnthropicKey("");
+  global.fetch = realFetch;
 }
 
 // ---------- בדיקות LIVE בלבד (מודל אמיתי) ----------

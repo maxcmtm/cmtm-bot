@@ -1,11 +1,87 @@
 // קריאה ל-Claude API עם tool-use לפלט מובנה ואמין (בלי פענוח טקסט חופשי)
 import { config } from "./config.js";
 import { SYSTEM_PROMPT } from "./knowledge.js";
-import { getRuntimeModel, getRuntimeAnthropicKey, logUsage } from "./store.js";
+import { getRuntimeModel, getRuntimeAnthropicKey, getRuntimeLlmProxy, logUsage } from "./store.js";
+
+const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+// קודים שמעידים על תקלה רגעית (עומס/רשת) ולכן שווים ניסיון חוזר באותו מסלול
+const TRANSIENT = [429, 500, 502, 503, 504, 529];
 
 // המפתח הפעיל: הגדרת זמן-ריצה (POST /admin/token {anthropicKey}) גוברת על ANTHROPIC_API_KEY
 export function activeAnthropicKey() {
   return getRuntimeAnthropicKey() || config.anthropicKey;
+}
+
+// פרוקסי המנוי הפעיל: זמן-ריצה גובר על LLM_PROXY_*. null = לקרוא ישר ל-API בתשלום.
+export function activeLlmProxy() {
+  const rt = getRuntimeLlmProxy();
+  if (rt) return rt;
+  const c = config.llmProxy;
+  return c && c.url && c.secret ? c : null;
+}
+
+// מסלולי הקריאה לפי סדר עדיפות: קודם מנוי Claude (הטוקנים יוצאים מהמערכת
+// שלנו), ואחריו ה-API בתשלום כרשת ביטחון. הפרוקסי מזריק את טוקן המנוי
+// ובלוק הזהות בעצמו, ולכן הגוף שנשלח זהה בשני המסלולים.
+function transports() {
+  const list = [];
+  const p = activeLlmProxy();
+  if (p) {
+    list.push({
+      name: "subscription",
+      url: p.url,
+      headers: { "x-proxy-secret": p.secret, "content-type": "application/json" },
+    });
+  }
+  const key = activeAnthropicKey();
+  if (key) {
+    list.push({
+      name: "api-key",
+      url: ANTHROPIC_URL,
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+    });
+  }
+  return list;
+}
+
+/**
+ * קריאה אחת ל-Claude Messages, עם מעבר-מסלול אוטומטי.
+ * 3 ניסיונות לכל מסלול על שגיאה רגעית; מסלול שנכשל לגמרי מפנה את מקומו לבא
+ * אחריו. כך נפילת פרוקסי או קיר-מכסה במנוי לא משאירים ליד בלי מענה.
+ * @returns {Promise<{data:object, via:string}>}
+ */
+export async function callMessages(body) {
+  const routes = transports();
+  if (!routes.length) {
+    throw new Error("אין מסלול ל-Claude: חסרים גם פרוקסי מנוי וגם ANTHROPIC_API_KEY");
+  }
+  let lastErr;
+  for (const t of routes) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const res = await fetch(t.url, {
+          method: "POST",
+          headers: t.headers,
+          body: JSON.stringify(body),
+        });
+        if (res.ok) return { data: await res.json(), via: t.name };
+        const errText = await res.text();
+        lastErr = new Error(`Claude ${t.name} ${res.status}: ${errText.slice(0, 200)}`);
+        if (!TRANSIENT.includes(res.status)) break; // שגיאה קבועה — למסלול הבא
+      } catch (e) {
+        lastErr = e;
+      }
+      if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
+    }
+    if (routes.length > 1) {
+      console.warn(`⚠️ מסלול ${t.name} נכשל (${String(lastErr?.message).slice(0, 120)}) — עובר למסלול הבא`);
+    }
+  }
+  throw lastErr || new Error("Claude API failed");
 }
 
 // המודל הפעיל: הגדרת זמן-ריצה (POST /admin/token {model}) גוברת על BOT_MODEL
@@ -79,31 +155,21 @@ export const RESPOND_TOOL = {
 
 // סיכום ליד לפי היסטוריה קיימת (ללידים ישנים שאין להם סיכום) — מודל זול
 export async function summarizeLead(history, lead) {
-  if (!activeAnthropicKey()) throw new Error("אין מפתח API");
+  if (!activeAnthropicKey() && !activeLlmProxy()) throw new Error("אין מסלול ל-Claude");
   const convo = history
     .map((t) => (t.role === "user" ? "הלקוח: " : "נועה: ") + t.content)
     .join("\n");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "x-api-key": activeAnthropicKey(),
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-5-5",
-      max_tokens: 600, // כולל מקום לחשיבה אדפטיבית קצרה
-      output_config: { effort: "low" },
-      messages: [
-        {
-          role: "user",
-          content: `לפניך שיחת וואטסאפ בין ליד לבין נועה, העוזרת של מכללת תרפיית מימדים (לימודי שיטת טיפול). סכם ב-2-3 משפטים בעברית עבור נציג מכירות: מי האדם, מה הביא אותו לפנות, מה הוא באמת מחפש, איפה השיחה עומדת והתנגדויות אם יש. בלי הקדמות, בלי כותרת ובלי הדגשות (**), ישר הסיכום.\n\nשם הליד: ${lead.name || "לא ידוע"}\n\n${convo}`,
-        },
-      ],
-    }),
+  const { data } = await callMessages({
+    model: "claude-haiku-5-5",
+    max_tokens: 600, // כולל מקום לחשיבה אדפטיבית קצרה
+    output_config: { effort: "low" },
+    messages: [
+      {
+        role: "user",
+        content: `לפניך שיחת וואטסאפ בין ליד לבין נועה, העוזרת של מכללת תרפיית מימדים (לימודי שיטת טיפול). סכם ב-2-3 משפטים בעברית עבור נציג מכירות: מי האדם, מה הביא אותו לפנות, מה הוא באמת מחפש, איפה השיחה עומדת והתנגדויות אם יש. בלי הקדמות, בלי כותרת ובלי הדגשות (**), ישר הסיכום.\n\nשם הליד: ${lead.name || "לא ידוע"}\n\n${convo}`,
+      },
+    ],
   });
-  if (!res.ok) throw new Error(`summarize ${res.status}`);
-  const data = await res.json();
   try { logUsage("claude-haiku-5-5", data.usage || {}); } catch { /* מעקב בלבד */ }
   // קוראים לפי type (דור 5.5 יכול להתחיל בבלוק thinking)
   const text = (data.content || []).find((b) => b.type === "text")?.text || "";
@@ -116,8 +182,8 @@ export async function summarizeLead(history, lead) {
  * @returns {Promise<{reply,persona,intent,score_delta,handoff,handoff_reason}>}
  */
 export async function askClaude(messages) {
-  if (!activeAnthropicKey()) {
-    throw new Error("ANTHROPIC_API_KEY חסר — הגדר אותו ב-.env");
+  if (!activeAnthropicKey() && !activeLlmProxy()) {
+    throw new Error("אין מסלול ל-Claude — הגדר פרוקסי מנוי או ANTHROPIC_API_KEY");
   }
 
   const model = activeModel();
@@ -133,33 +199,8 @@ export async function askClaude(messages) {
   // דור 5.5 (Haiku/Sonnet): חשיבה אדפטיבית מופעלת כברירת מחדל — effort נמוך לשיחת וואטסאפ קצרה (עלות ומהירות)
   if (/-5-5/.test(model)) body.output_config = { effort: "low" };
 
-  // עד 3 ניסיונות עם המתנה — כדי שתקלה רגעית (עומס/רשת) לא תשאיר ליד בלי מענה
-  let res, lastErr;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "x-api-key": activeAnthropicKey(),
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) break;
-      const errText = await res.text();
-      lastErr = new Error(`Claude API ${res.status}: ${errText.slice(0, 200)}`);
-      // שגיאות זמניות בלבד שוות ניסיון חוזר
-      if (![429, 500, 502, 503, 504, 529].includes(res.status)) throw lastErr;
-    } catch (e) {
-      lastErr = e;
-      res = null;
-    }
-    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 2000));
-  }
-  if (!res || !res.ok) throw lastErr || new Error("Claude API failed");
-
-  const data = await res.json();
+  // מנוי קודם, API בתשלום כרשת ביטחון; ניסיונות חוזרים בתוך callMessages
+  const { data } = await callMessages(body);
   try { logUsage(model, data.usage || {}); } catch { /* מעקב בלבד */ }
   const toolUse = (data.content || []).find((b) => b.type === "tool_use");
   if (!toolUse) {
