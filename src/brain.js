@@ -120,9 +120,18 @@ export function detectRegistration(text) {
   return REGISTER_RE.test(t);
 }
 
+// לחיצה על כפתור של קמפיין: התאמה מדויקת לטקסט הכפתור (אחרי ניקוי פיסוק/אימוג'י בקצוות).
+// כך כפתור חדש עובד מהרגע שהוגדר בקמפיין, בלי לגעת ב-REGISTER_RE ובלי לחכות לפריסה.
+export function matchesCampaignButton(text, buttons) {
+  if (!buttons || !buttons.length) return false;
+  const norm = (x) => (x || "").replace(ATT_TRIM, "").replace(/\s+/g, " ").trim();
+  const t = norm(text);
+  return !!t && buttons.some((b) => norm(b) === t);
+}
+
 export async function handleMessage(lead, history, incoming, askFn = askClaude, opts = {}) {
   // גרדרייל קמפיין: מצב מבצע פעיל + "אני רוצה להרשם" → תשובה קבועה, ליד חם, רישום ב-CRM (ב-server)
-  if (opts.campaign && detectRegistration(incoming)) {
+  if (opts.campaign && (matchesCampaignButton(incoming, opts.campaign.buttons) || detectRegistration(incoming))) {
     return {
       reply: opts.campaign.reply || "מעולה! רשמנו אותך להטבה 🙂 יועצת לימודים תחזור אליך בהקדם לסיום ההרשמה.",
       persona: lead.persona || "unknown",

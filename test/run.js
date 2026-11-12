@@ -2,7 +2,7 @@
 //   - בלי ANTHROPIC_API_KEY: מצב MOCK — בודק את הגרדריילים הדטרמיניסטיים בלבד.
 //   - עם מפתח: מצב LIVE — בודק גם את התנהגות המודל האמיתי מול תרחישים.
 import { config } from "../src/config.js";
-import { handleMessage, humanizeTone, detectAttendance, detectRegistration } from "../src/brain.js";
+import { handleMessage, humanizeTone, detectAttendance, detectRegistration, matchesCampaignButton } from "../src/brain.js";
 import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
 import { setRuntimeLlmProxy, setRuntimeAnthropicKey } from "../src/store.js";
 import { matchAutomation } from "../src/automation-skip.js";
@@ -137,6 +137,10 @@ console.log("גרדריילים דטרמיניסטיים:");
   const camp={name:"מבצע 500",sourceValue:"רוצה להרשם 500",reply:"מעולה! רשמנו אותך 🙂"};
   const r=await handleMessage(lead, [], "אני רוצה להרשם", ask, {campaign:camp});
   check("קמפיין: גארדרייל בלי מודל, handoff, intent", r._guardrail==="campaign_register" && r.handoff===true && r.intent==="buying_signal" && r.reply==="מעולה! רשמנו אותך 🙂", JSON.stringify(r));
+  const camp2={name:"השכמה",sourceValue:"x",reply:"קיבלנו 🙂",buttons:["כן, דברו איתי"]};
+  const rb=await handleMessage(lead, [], "כן, דברו איתי", ask, {campaign:camp2});
+  check("קמפיין: כפתור מוגדר נתפס בלי REGISTER_RE", rb._guardrail==="campaign_register" && rb.reply==="קיבלנו 🙂", JSON.stringify(rb).slice(0,200));
+  check("קמפיין: התאמת כפתור מדויקת בלבד", matchesCampaignButton("כן דברו איתי 🙂",["כן, דברו איתי"])===false && matchesCampaignButton("כן, דברו איתי!",["כן, דברו איתי"])===true && matchesCampaignButton("דברו איתי על המחיר",["כן, דברו איתי"])===false);
   const r2=await handleMessage(lead, [], "אני רוצה להרשם", ask, {});
   check("בלי קמפיין: אין גארדרייל", r2._guardrail!=="campaign_register");
 }

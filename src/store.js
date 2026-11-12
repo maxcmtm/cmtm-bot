@@ -76,6 +76,23 @@ export function setCampaign(c) {
   save();
 }
 
+// קמפיינים לפי תבנית: כמה תפוצות במקביל, כל אחת עם מקור/תשובה/כפתורים משלה.
+// ההתאמה לליד נעשית לפי התבנית האחרונה שנשלחה אליו (הסימון בהיסטוריה), לא לפי "הקמפיין הפעיל".
+export function getCampaignFor(template) {
+  const c = (state.runtime?.campaigns || {})[template] || null;
+  if (!c) return null;
+  if (c.until && Date.now() > c.until) return null;
+  return c;
+}
+export function setCampaignFor(template, c) {
+  if (!state.runtime.campaigns) state.runtime.campaigns = {};
+  if (c) state.runtime.campaigns[template] = c; else delete state.runtime.campaigns[template];
+  save();
+}
+export function listCampaigns() {
+  return Object.values(state.runtime?.campaigns || {}).filter((c) => !c.until || Date.now() <= c.until);
+}
+
 // מפתח Anthropic בזמן ריצה (גובר על ANTHROPIC_API_KEY) — לרוטציית מפתח בלי לגעת ב-Render: POST /admin/token {anthropicKey}
 export function getRuntimeAnthropicKey() {
   return state.runtime?.anthropicKey || "";

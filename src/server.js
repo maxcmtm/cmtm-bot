@@ -51,6 +51,9 @@ import {
   setRuntimeLlmProxy,
   getCampaign,
   setCampaign,
+  getCampaignFor,
+  setCampaignFor,
+  listCampaigns,
   getBroadcastJob,
   setBroadcastJob,
 } from "./store.js";
@@ -92,6 +95,17 @@ function enqueueByPhone(phone, fn) {
   inflight.set(phone, next);
   next.finally(() => { if (inflight.get(phone) === next) inflight.delete(phone); });
   return next;
+}
+
+// התבנית האחרונה שנשלחה לליד בתפוצה (סימון "[נשלחה תבנית <name> — ...]") → הקמפיין שמוגדר לה
+function campaignForLead(history) {
+  for (let i = (history || []).length - 1; i >= 0; i--) {
+    const m = history[i];
+    if (m.role !== "assistant") continue;
+    const hit = /^\[נשלחה תבנית ([a-z0-9_]+)/.exec(m.content || "");
+    if (hit) return getCampaignFor(hit[1]);
+  }
+  return null;
 }
 
 // מעבד הודעת וואטסאפ אחת מ-Meta: מריץ את הבוט, שולח תשובה, מעדכן מצב
@@ -168,10 +182,11 @@ async function processWhatsApp(msg) {
     return;
   }
   let decision;
+  // הקמפיין של הליד = לפי התבנית האחרונה שנשלחה אליו בתפוצה; אם אין כזה, הקמפיין הכללי הפעיל
+  const campaign = campaignForLead(history) || getCampaign();
   try {
     // למודל נשלחות רק 16 ההודעות האחרונות; ההיסטוריה המלאה נשמרת לתצוגה
     const studentInfo = studentCode ? await getStudentInfo(msg.from).catch(() => "") : "";
-    const campaign = getCampaign();
     decision = await handleMessage(lead, history.slice(-16), msg.text, undefined, {
       ...(studentCode ? { student: STUDENT_STATUS_NAMES[studentCode] || "תלמיד/ה", studentInfo } : {}),
       ...(campaign ? { campaign } : {}),
@@ -262,7 +277,7 @@ async function processWhatsApp(msg) {
 
   // קמפיין: "אני רוצה להרשם" → כרטיס ב-CRM עם "הגיע ממבצע", פנייה חוזרת, ליד חם, התראה לסמדר
   if (decision._guardrail === "campaign_register") {
-    const camp = getCampaign() || {};
+    const camp = campaign || {};
     updateLead(msg.from, { campaignTs: Date.now(), campaignName: camp.name || "", status: "hot" });
     console.log(`🎯 ${msg.name || msg.from} רוצה להירשם (${camp.name})`);
     registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: camp.sourceValue || camp.name || "מבצע", ownerId: camp.ownerId || "" })
@@ -272,7 +287,7 @@ async function processWhatsApp(msg) {
       sendTemplate(getAlertPhone(), "hot_lead_alert", [
         `🎯 ${msg.name || l.name || "ללא שם"}`,
         waToIsraeli(msg.from),
-        `${camp.name || "מבצע"}: לחץ/ה "אני רוצה להרשם" — לסגור היום`.slice(0, 120),
+        `${camp.name || "מבצע"}: לחץ/ה "${(msg.text || "").slice(0, 30)}"`.slice(0, 120),
       ]).catch(() => {});
     }
     return;
@@ -608,12 +623,18 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST") { try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "bad json" }); } }
     const secret = req.method === "GET" ? url.searchParams.get("secret") : body.secret;
     if (secret !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
-    if (req.method === "POST") {
+    if (req.method === "POST" && body.template) {
+      // קמפיין לפי תבנית: {template, name, sourceValue, reply, ownerId, buttons:[...], hours} ; {template, active:false} מוחק
+      if (body.active === false) setCampaignFor(body.template, null);
+      else setCampaignFor(body.template, { template: body.template, name: body.name || body.template, sourceValue: body.sourceValue || body.name || body.template, reply: body.reply || "", ownerId: body.ownerId || "", buttons: Array.isArray(body.buttons) ? body.buttons : [], startedTs: Date.now(), until: body.hours ? Date.now() + Number(body.hours) * 3600000 : 0 });
+      console.log(`🎯 קמפיין לתבנית ${body.template}: ${JSON.stringify(getCampaignFor(body.template))}`);
+    } else if (req.method === "POST") {
       if (body.active === false) setCampaign(null);
       else setCampaign({ active: true, name: body.name || "מבצע", sourceValue: body.sourceValue || body.name || "מבצע", reply: body.reply || "", ownerId: body.ownerId || "", startedTs: Date.now(), until: body.hours ? Date.now() + Number(body.hours) * 3600000 : 0 });
       console.log(`🎯 קמפיין: ${JSON.stringify(getCampaign())}`);
     }
-    const since = Number(url.searchParams.get("since") || 0) || (getCampaign()?.startedTs || Date.now() - 48 * 3600000);
+    const starts = [getCampaign()?.startedTs, ...listCampaigns().map((c) => c.startedTs)].filter(Boolean);
+    const since = Number(url.searchParams.get("since") || 0) || (starts.length ? Math.min(...starts) : Date.now() - 48 * 3600000);
     const rows = allLeads().filter((lx) => lx.campaignTs && lx.campaignTs >= since)
       .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, fireberryId: lx.fireberryId || "", status: lx.status }))
       .sort((a, b) => a.time.localeCompare(b.time));
@@ -622,7 +643,7 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=campaign.csv" });
       return res.end(["\uFEFFשם,טלפון,זמן,קמפיין,כרטיס CRM", ...rows.map((r) => [r.name, r.phone, r.time, r.campaign, r.fireberryId].map(esc).join(","))].join("\n"));
     }
-    return send(res, 200, { campaign: getCampaign(), total: rows.length, rows });
+    return send(res, 200, { campaign: getCampaign(), campaigns: listCampaigns(), total: rows.length, rows });
   }
 
   // סימון ידני ברשימת ההגעה: {phone, kind: "confirmed"|"declined"|"clear", text?}
