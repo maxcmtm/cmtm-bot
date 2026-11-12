@@ -102,7 +102,7 @@ function campaignForLead(history) {
   for (let i = (history || []).length - 1; i >= 0; i--) {
     const m = history[i];
     if (m.role !== "assistant") continue;
-    const hit = /^\[נשלחה תבנית ([a-z0-9_]+)/.exec(m.content || "");
+    const hit = /^\[נשלחה תבנית (?:שירות )?([a-z0-9_]+)/.exec(m.content || "");
     if (hit) return getCampaignFor(hit[1]);
   }
   return null;
@@ -278,7 +278,7 @@ async function processWhatsApp(msg) {
   // קמפיין: "אני רוצה להרשם" → כרטיס ב-CRM עם "הגיע ממבצע", פנייה חוזרת, ליד חם, התראה לסמדר
   if (decision._guardrail === "campaign_register") {
     const camp = campaign || {};
-    updateLead(msg.from, { campaignTs: Date.now(), campaignName: camp.name || "", status: "hot" });
+    updateLead(msg.from, { campaignTs: Date.now(), campaignName: camp.name || "", campaignVia: "button", status: "hot" });
     console.log(`🎯 ${msg.name || msg.from} רוצה להירשם (${camp.name})`);
     registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: camp.sourceValue || camp.name || "מבצע", ownerId: camp.ownerId || "" })
       .then((r) => { if (r?.accountId) updateLead(msg.from, { fireberryId: r.accountId }); })
@@ -335,6 +335,20 @@ async function processWhatsApp(msg) {
     // ביקש הסרה → מסמנים גם ב-CRM "הוסר מרשימת דיוור"
     if (accId && decision.intent === "unsubscribe") await markOptedOut(accId);
   })().catch((e) => console.error("[fireberry] log:", e.message));
+
+  // חזר מתפוצה בתשובה כתובה (לא בלחיצה על הכפתור): אותו סימון ב-CRM כמו לחיצה —
+  // "הגיע ממבצע" + מנהל לקוח לפי הקמפיין + פנייה חוזרת — פעם אחת לכל ליד וקמפיין.
+  const NOT_ENGAGED = ["event_confirm", "event_decline", "unsubscribe", "job_seeker", "repeat_loop", "ack_closing"];
+  const engaged = campaign && l.campaignName !== campaign.name && decision.intent !== "unsubscribe" &&
+    !NOT_ENGAGED.includes(decision._guardrail) &&
+    (decision.handoff || ["question", "buying_signal", "request_human"].includes(decision.intent));
+  if (engaged) {
+    updateLead(msg.from, { campaignTs: Date.now(), campaignName: campaign.name || "", campaignVia: "reply" });
+    console.log(`🎯 ${msg.name || msg.from} חזר/ה מתפוצה בתשובה כתובה (${campaign.name})`);
+    await registerCampaignLead({ name: msg.name || l.name, phone: msg.from, sourceValue: campaign.sourceValue || campaign.name || "מבצע", ownerId: campaign.ownerId || "" })
+      .then((r) => { if (r?.accountId) updateLead(msg.from, { fireberryId: r.accountId }); })
+      .catch((e) => console.error("[campaign-reply]", e.message));
+  }
 }
 
 // ניסיון חוזר אוטומטי להודעות שנכשלו (קרדיט/תקלת API): כל 10 דקות, לפי סדר הגעה,
@@ -636,12 +650,12 @@ const server = http.createServer(async (req, res) => {
     const starts = [getCampaign()?.startedTs, ...listCampaigns().map((c) => c.startedTs)].filter(Boolean);
     const since = Number(url.searchParams.get("since") || 0) || (starts.length ? Math.min(...starts) : Date.now() - 48 * 3600000);
     const rows = allLeads().filter((lx) => lx.campaignTs && lx.campaignTs >= since)
-      .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, fireberryId: lx.fireberryId || "", status: lx.status }))
+      .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, via: lx.campaignVia === "reply" ? "תשובה כתובה" : "כפתור", fireberryId: lx.fireberryId || "", status: lx.status }))
       .sort((a, b) => a.time.localeCompare(b.time));
     if (url.searchParams.get("format") === "csv") {
       const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
       res.writeHead(200, { "content-type": "text/csv; charset=utf-8", "content-disposition": "attachment; filename=campaign.csv" });
-      return res.end(["\uFEFFשם,טלפון,זמן,קמפיין,כרטיס CRM", ...rows.map((r) => [r.name, r.phone, r.time, r.campaign, r.fireberryId].map(esc).join(","))].join("\n"));
+      return res.end(["\uFEFFשם,טלפון,זמן,קמפיין,איך חזר,כרטיס CRM", ...rows.map((r) => [r.name, r.phone, r.time, r.campaign, r.via, r.fireberryId].map(esc).join(","))].join("\n"));
     }
     return send(res, 200, { campaign: getCampaign(), campaigns: listCampaigns(), total: rows.length, rows });
   }
