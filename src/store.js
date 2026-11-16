@@ -340,7 +340,9 @@ export function updateLead(phone, fields = {}) {
   const l = getLead(phone);
   if (fields.persona && fields.persona !== "unknown") l.persona = fields.persona;
   if (fields.scoreDelta) l.score += fields.scoreDelta;
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText", "campaignTs", "campaignName", "campaignVia"]) {
+  // רשימת היתר: שדה שלא רשום כאן נזרק בשקט. (16.11: heldByFreeze נפל בדיוק
+  // כך — הסימון נכתב, לא נשמר, והליד היה מקבל הודעת פתיחה בדיעבד בסוף ההקפאה.)
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText", "campaignTs", "campaignName", "campaignVia", "heldByFreeze"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();

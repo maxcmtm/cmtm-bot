@@ -4,7 +4,7 @@
 import { config } from "../src/config.js";
 import { handleMessage, humanizeTone, detectAttendance, detectRegistration, matchesCampaignButton } from "../src/brain.js";
 import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
-import { setRuntimeLlmProxy, setRuntimeAnthropicKey, getSalesFreeze, setSalesFreeze, salesFreezeActive } from "../src/store.js";
+import { setRuntimeLlmProxy, setRuntimeAnthropicKey, getSalesFreeze, setSalesFreeze, salesFreezeActive, heldByFreezeLeads, updateLead, allLeads, deleteLead } from "../src/store.js";
 import { proactiveBlockedReason, skipMissedOpener } from "../src/drip.js";
 import { matchAutomation } from "../src/automation-skip.js";
 import { parseIncoming } from "../src/whatsapp.js";
@@ -285,6 +285,16 @@ console.log("\nהקפאת מכירה יזומה:");
   const normal = { id: "97250000009Y", seqStep: -1, status: "in_sequence" };
   check("ליד שהוקפא לא מקבל פתיחה בדיעבד", skipMissedOpener(held) === true);
   check("ליד שפספס פתיחה מסיבה אחרת כן מקבל אותה", skipMissedOpener(normal) === false);
+
+  // הסימון חייב לשרוד את updateLead: רשימת ההיתר שם זורקת שדה לא מוכר בשקט,
+  // וליד שהסימון שלו נזרק מקבל בסוף ההקפאה בדיוק את הפתיחה שרצינו למנוע.
+  const probe = "97250000009Z";
+  updateLead(probe, { heldByFreeze: Date.now(), status: "in_sequence", seqStep: -1 });
+  const stored = allLeads().find((l) => l.id === probe);
+  check("סימון ההקפאה נשמר בליד", !!stored?.heldByFreeze);
+  check("הליד השמור נספר ברשימת המוחזקים", heldByFreezeLeads().some((l) => l.id === probe));
+  check("הליד השמור לא יקבל פתיחה בדיעבד", skipMissedOpener(stored) === true);
+  deleteLead(probe);
 
   // תאריך תפוגה: הקפאה שעבר זמנה חייבת להיפתח לבד
   setSalesFreeze({ until: Date.now() - 1000, by: "מקס", reason: "פגה", startedTs: 0 });
