@@ -51,6 +51,10 @@ import {
   setRuntimeLlmProxy,
   getCampaign,
   setCampaign,
+  getSalesFreeze,
+  setSalesFreeze,
+  salesFreezeActive,
+  heldByFreezeLeads,
   getCampaignFor,
   setCampaignFor,
   listCampaigns,
@@ -500,6 +504,8 @@ const server = http.createServer(async (req, res) => {
       pending: getPending().length,
       now: Date.now(),
       dripEnabled: config.drip.enabled,
+      salesFreeze: salesFreezeActive() ? { until: new Date(getSalesFreeze().until).toISOString(), by: getSalesFreeze().by, reason: getSalesFreeze().reason } : null,
+      heldByFreeze: heldByFreezeLeads().length,
       paused: isPaused(),
       failures: getFailures().slice(-20),
       report: latestReport(),
@@ -547,6 +553,8 @@ const server = http.createServer(async (req, res) => {
       studentSet: studentSetSize(),
       phoneNumberId: config.whatsapp.phoneNumberId,
       dripEnabled: config.drip.enabled,
+      salesFreeze: salesFreezeActive() ? { until: new Date(getSalesFreeze().until).toISOString(), by: getSalesFreeze().by, reason: getSalesFreeze().reason } : null,
+      heldByFreeze: heldByFreezeLeads().length,
       paused: isPaused(),
       leadCount: leads.length,
       leads,
@@ -909,6 +917,50 @@ const server = http.createServer(async (req, res) => {
     }
     setPaused(!!body.paused);
     return send(res, 200, { paused: isPaused() });
+  }
+
+  // הקפאת מכירה יזומה (מקס, 16.11.2026). נועה ממשיכה לענות לכל מי שכותב
+  // אליה; מה שנעצר הוא רק מה שהיא יוזמת: הודעת פתיחה, שלב חימום, תזכורת.
+  // POST {days:14,reason:".."} להפעלה · POST {off:true} לשחרור מוקדם.
+  // חובה תאריך סיום: הקפאה פתוחה הופכת להקפאה שנשכחה.
+  if (path === "/admin/sales-freeze" && (req.method === "GET" || req.method === "POST")) {
+    const secret = req.method === "GET" ? url.searchParams.get("secret") : null;
+    let body = {};
+    if (req.method === "POST") {
+      try { body = JSON.parse((await readBody(req)) || "{}"); }
+      catch { return send(res, 400, { error: "invalid json" }); }
+    }
+    if ((req.method === "GET" ? secret : body.secret) !== config.webhookSecret) {
+      return send(res, 401, { error: "unauthorized" });
+    }
+    if (req.method === "POST") {
+      if (body.off) {
+        setSalesFreeze(null);
+        console.log("🔥 הקפאת המכירה שוחררה ידנית");
+      } else {
+        const days = Number(body.days || 0);
+        if (!days || days < 1 || days > 90) return send(res, 400, { error: "days חייב להיות 1-90" });
+        setSalesFreeze({
+          until: Date.now() + days * 24 * 3600 * 1000,
+          by: String(body.by || "").slice(0, 40),
+          reason: String(body.reason || "").slice(0, 300),
+          startedTs: Date.now(),
+        });
+        console.log(`🧊 הקפאת מכירה יזומה ל-${days} ימים`);
+      }
+    }
+    const f = getSalesFreeze();
+    const held = heldByFreezeLeads();
+    return send(res, 200, {
+      active: salesFreezeActive(),
+      freeze: f,
+      untilIso: f?.until ? new Date(f.until).toISOString() : null,
+      heldLeads: held.length,
+      leads: held.map((l) => ({
+        phone: l.id, name: l.name || "", heldAt: new Date(l.heldByFreeze).toISOString(),
+        fireberryId: l.fireberryId || "", status: l.status,
+      })),
+    });
   }
 
   // עדכון טוקן וואטסאפ מרחוק (מוגן בסוד) — מעדכן בלי לגעת ב-Render

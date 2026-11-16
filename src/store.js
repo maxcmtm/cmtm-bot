@@ -63,6 +63,30 @@ export function setLastAlert(key) {
 export function getBroadcastJob() { return state.runtime?.broadcastJob || null; }
 export function setBroadcastJob(j) { state.runtime.broadcastJob = j || null; save(); }
 
+// הקפאת מכירה יזומה (מקס, 16.11.2026): נועה ממשיכה לענות לכל מי שכותב אליה,
+// אבל לא יוזמת — לא הודעת פתיחה, לא שלב חימום, לא תזכורת. הבדיקה: האם רצף
+// החימום "מחמם יתר על המידה" ומשאיר לנציג ליד שאין איתו על מה לדבר.
+// {until, by, reason, startedTs}. חייב `until`: הקפאה בלי תאריך תפוגה הופכת
+// בתוך חודש להקפאה קבועה שאיש לא זוכר להסיר, אז כזו לא נחשבת פעילה בכלל.
+export function getSalesFreeze() {
+  return state.runtime?.salesFreeze || null;
+}
+export function salesFreezeActive() {
+  const f = state.runtime?.salesFreeze;
+  if (!f || !f.until) return false;
+  return Date.now() < f.until;
+}
+export function setSalesFreeze(f) {
+  state.runtime.salesFreeze = f || null;
+  save();
+}
+// לידים שנכנסו בזמן ההקפאה ולא קיבלו הודעת פתיחה. מקס, 16.11: "לא צריך לשלוח
+// לו אחרי זה רטרו" — הם נשארים מסומנים גם אחרי שההקפאה פגה, עד שמשחררים
+// אותם במפורש. בלי הסימון הזה, יום הסיום מתחיל במפץ של פתיחות בנות שבועיים.
+export function heldByFreezeLeads() {
+  return Object.values(state.leads).filter((l) => l.heldByFreeze);
+}
+
 // מצב קמפיין: תפוצת מבצע שבה "אני רוצה להרשם" = רישום ל-CRM עם מקור + ליד חם + התראה
 // {active, name, sourceValue, reply, until}
 export function getCampaign() {

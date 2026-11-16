@@ -4,7 +4,8 @@
 import { config } from "../src/config.js";
 import { handleMessage, humanizeTone, detectAttendance, detectRegistration, matchesCampaignButton } from "../src/brain.js";
 import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
-import { setRuntimeLlmProxy, setRuntimeAnthropicKey } from "../src/store.js";
+import { setRuntimeLlmProxy, setRuntimeAnthropicKey, getSalesFreeze, setSalesFreeze, salesFreezeActive } from "../src/store.js";
+import { proactiveBlockedReason, skipMissedOpener } from "../src/drip.js";
 import { matchAutomation } from "../src/automation-skip.js";
 import { parseIncoming } from "../src/whatsapp.js";
 
@@ -256,6 +257,50 @@ console.log("\nמסלול הקריאה למודל:");
   check("כיבוי פרוקסי מחזיר ל-API בתשלום", activeLlmProxy() === null);
   setRuntimeAnthropicKey("");
   global.fetch = realFetch;
+}
+
+// ---------- הקפאת מכירה יזומה (מקס, 16.11.2026) ----------
+// נועה ממשיכה לענות למי שכותב אליה; מה שנעצר הוא רק מה שהיא יוזמת.
+// שתי התנהגויות קריטיות נבדקות כאן: שההקפאה פגה לבד בתאריך, ושליד שנכנס
+// בזמנה לא מקבל הודעת פתיחה בדיעבד ביום שההקפאה מסתיימת.
+console.log("\nהקפאת מכירה יזומה:");
+{
+  const before = getSalesFreeze();
+  // בעותק המקומי DRIP_ENABLED=false (הגנה על הבוט החי). ההקפאה נבדקת מול
+  // המצב שיש ב-Render — חימום דלוק — אחרת הבדיקה מודדת את המתג הלא נכון.
+  const dripBefore = config.drip.enabled;
+  config.drip.enabled = true;
+
+  setSalesFreeze(null);
+  check("ברירת מחדל: אין הקפאה", salesFreezeActive() === false);
+  check("יוזמה פתוחה כשאין הקפאה", proactiveBlockedReason() !== "freeze", proactiveBlockedReason());
+
+  const until = Date.now() + 14 * 24 * 3600 * 1000;
+  setSalesFreeze({ until, by: "מקס", reason: "בדיקה", startedTs: Date.now() });
+  check("הקפאה פעילה אחרי הפעלה", salesFreezeActive() === true);
+  check("היוזמה חסומה בגלל ההקפאה", proactiveBlockedReason() === "freeze", proactiveBlockedReason());
+
+  // ליד שנכנס בזמן ההקפאה: נשמר, מסומן, ולא מקבל פתיחה בדיעבד
+  const held = { id: "97250000009X", seqStep: -1, heldByFreeze: Date.now(), status: "in_sequence" };
+  const normal = { id: "97250000009Y", seqStep: -1, status: "in_sequence" };
+  check("ליד שהוקפא לא מקבל פתיחה בדיעבד", skipMissedOpener(held) === true);
+  check("ליד שפספס פתיחה מסיבה אחרת כן מקבל אותה", skipMissedOpener(normal) === false);
+
+  // תאריך תפוגה: הקפאה שעבר זמנה חייבת להיפתח לבד
+  setSalesFreeze({ until: Date.now() - 1000, by: "מקס", reason: "פגה", startedTs: 0 });
+  check("הקפאה שפג תוקפה נפתחת לבד", salesFreezeActive() === false);
+  check("היוזמה חוזרת אחרי התפוגה", proactiveBlockedReason() !== "freeze", proactiveBlockedReason());
+
+  // הקפאה בלי תאריך סיום לא תקפה — אחרת היא נשארת לנצח
+  setSalesFreeze({ by: "מקס", reason: "בלי תאריך" });
+  check("הקפאה בלי תאריך סיום לא נתפסת כפעילה", salesFreezeActive() === false);
+
+  // המתג הישן עדיין גובר: חימום כבוי = אין יוזמה, בלי קשר להקפאה
+  config.drip.enabled = false;
+  check("חימום כבוי חוסם יוזמה גם בלי הקפאה", proactiveBlockedReason() === "disabled");
+
+  config.drip.enabled = dripBefore;
+  setSalesFreeze(before);
 }
 
 // ---------- בדיקות LIVE בלבד (מודל אמיתי) ----------

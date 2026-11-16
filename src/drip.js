@@ -1,8 +1,22 @@
 // מנוע החימום: שולח את התבנית הבאה ברצף ללידים שלא ענו, כל X ימים.
 import { config } from "./config.js";
-import { allLeads, updateLead, pushAssistantTurn, isPaused } from "./store.js";
+import { allLeads, updateLead, pushAssistantTurn, isPaused, salesFreezeActive } from "./store.js";
 import { sendTemplate, sendText, getNumberQuality } from "./whatsapp.js";
 import { sweepTwinLeads, refreshStudentSet, studentStatus } from "./fireberry.js";
+
+// למה כל יוזמה של נועה חסומה כרגע. "" = פתוח. שלוש נקודות היציאה (פתיחה,
+// שלב חימום, תזכורת) שואלות את אותה שאלה, כדי שלא תישאר אחת פתוחה בטעות.
+export function proactiveBlockedReason() {
+  if (!config.drip.enabled) return "disabled";
+  if (salesFreezeActive()) return "freeze";
+  return "";
+}
+
+// ליד שנכנס בזמן הקפאת המכירה לא מקבל את הודעת הפתיחה שלו בדיעבד — גם לא
+// אחרי שההקפאה פגה. הוא ממתין ברשימה עד החלטה אנושית.
+export function skipMissedOpener(lead) {
+  return !!lead.heldByFreeze;
+}
 
 // הקשר קצר של מה שנשלח בכל שלב — נשמר בהיסטוריה כדי שהבוט יבין את תשובת הליד
 const STEP_CONTEXT = [
@@ -83,6 +97,12 @@ export async function startSequence(lead) {
     console.log(`⏸️ חימום מושבת — הליד ${lead.name || lead.id} נרשם אך לא נשלחה הודעת פתיחה`);
     return;
   }
+  // הקפאת מכירה: הליד נרשם ונשמר, מסומן, ולא מקבל פתיחה — לא עכשיו ולא בדיעבד
+  if (salesFreezeActive()) {
+    if (!lead.heldByFreeze) updateLead(lead.id, { heldByFreeze: Date.now() });
+    console.log(`🧊 הקפאת מכירה — ${lead.name || lead.id} נשמר בצד בלי הודעת פתיחה`);
+    return;
+  }
   if (lead.seqStep >= 0) return; // כבר התחיל
   if (lead.status === "unsubscribed") return; // ביקש שלא נפנה אליו
   if (studentStatus(lead.id)) { updateLead(lead.id, { status: "student" }); return; } // תלמיד קיים — אין שיווק
@@ -105,7 +125,7 @@ export async function startSequence(lead) {
 //   3. ליד שמעולם לא ענה עוצר אחרי maxSilentStep — לא ממשיכים לשלוח שיווק למי שמתעלם,
 //      כי אלה ההודעות שנחסמות ומדווחות ומורידות את דירוג האיכות.
 export async function runDripCheck() {
-  if (!config.drip.enabled || isPaused()) return 0;
+  if (proactiveBlockedReason() || isPaused()) return 0;
   if (isShabbat()) return 0; // אין הודעות יזומות בשבת
   if (isQuietHours()) return 0; // אין הודעות יזומות בלילה — השלמה בבוקר
   const now = Date.now();
@@ -132,7 +152,11 @@ export async function runDripCheck() {
   for (const lead of allLeads()) {
     if (lead.status !== "in_sequence") continue; // active_chat/hot/unsubscribed/cold לא מקבלים
     if (studentStatus(lead.id)) { updateLead(lead.id, { status: "student" }); students++; continue; } // נרשם בינתיים — עוצרים שיווק
-    if (lead.seqStep < 0) { due.push({ lead, step: 0 }); continue; } // פתיחה שהוחמצה (נכנס בשבת)
+    if (lead.seqStep < 0) {
+      if (skipMissedOpener(lead)) continue; // נכנס בזמן ההקפאה — אין פתיחה בדיעבד
+      due.push({ lead, step: 0 }); // פתיחה שהוחמצה (נכנס בשבת)
+      continue;
+    }
     if (lead.seqStep >= SEQUENCE.length - 1) continue; // סיים רצף
     if (now - lead.lastDripTs < stepMs) continue; // עוד לא עברו X ימים
     if (lead.lastInboundTs && now - lead.lastInboundTs < quietMs) continue; // בשיחה פעילה
@@ -165,7 +189,7 @@ const NUDGE_TEXT =
   "היי 🙂 שמתי לב שעצרנו באמצע. אם נשארה לך שאלה פתוחה או משהו שהיה שווה להרחיב עליו, אני כאן.";
 
 export async function runNudgeCheck() {
-  if (!config.drip.enabled || isPaused()) return 0;
+  if (proactiveBlockedReason() || isPaused()) return 0;
   if (isShabbat()) return 0; // אין תזכורות בשבת
   if (isQuietHours()) return 0; // אין תזכורות בלילה
   const now = Date.now();
