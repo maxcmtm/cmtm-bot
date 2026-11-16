@@ -59,6 +59,27 @@ export function setLastAlert(key) {
   save();
 }
 
+// מעקב מסירה: מונים יומיים של סטטוסי מטא (sent/delivered/read/failed) וקודי השגיאה של failed.
+// 16.11.2026: תפוצה של 1,678 הזמנות חזרה 200 על כל שליחה ואף אחד לא ענה, ולא הייתה לנו
+// דרך לדעת אם ההודעות הגיעו לטלפונים. נשמרים 21 ימים אחרונים.
+export function bumpDelivery(status, code, title) {
+  if (!status) return;
+  const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  if (!state.runtime.delivery) state.runtime.delivery = {};
+  const d = state.runtime.delivery;
+  if (!d[day]) d[day] = { sent: 0, delivered: 0, read: 0, failed: 0, errors: {} };
+  if (status in d[day] && status !== "errors") d[day][status]++;
+  if (status === "failed") {
+    const k = String(code || "unknown");
+    if (!d[day].errors[k]) d[day].errors[k] = { n: 0, title: String(title || "").slice(0, 160) };
+    d[day].errors[k].n++;
+  }
+  const days = Object.keys(d).sort();
+  while (days.length > 21) delete d[days.shift()];
+  save();
+}
+export function getDelivery() { return state.runtime?.delivery || {}; }
+
 // תפוצה המונית: המשימה נשמרת על הדיסק כדי לשרוד ריסטארט/פריסה (ממשיכים מהאינדקס) ולתמוך בתזמון (startAt)
 export function getBroadcastJob() { return state.runtime?.broadcastJob || null; }
 export function setBroadcastJob(j) { state.runtime.broadcastJob = j || null; save(); }

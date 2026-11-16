@@ -49,6 +49,27 @@ export function parseIncoming(body) {
   return out;
 }
 
+// סטטוסי מסירה שמטא שולחת על כל הודעה יוצאת (sent / delivered / read / failed).
+// שליחה שחוזרת 200 עדיין יכולה להיכשל בדרך לטלפון; הסיבה מגיעה רק כאן, בקוד השגיאה.
+export function parseStatuses(body) {
+  const out = [];
+  for (const entry of body.entry || []) {
+    for (const change of entry.changes || []) {
+      for (const s of change.value?.statuses || []) {
+        const e = (s.errors || [])[0] || {};
+        out.push({
+          id: s.id || "",
+          status: s.status || "",
+          to: s.recipient_id || "",
+          code: e.code || 0,
+          title: e.title || e.message || "",
+        });
+      }
+    }
+  }
+  return out;
+}
+
 // דירוג איכות המספר אצל מטא: GREEN / YELLOW / RED / UNKNOWN
 export async function getNumberQuality() {
   if (!activeToken() || !config.whatsapp.phoneNumberId) return "UNKNOWN";

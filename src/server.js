@@ -10,7 +10,7 @@ import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, activeLlmProxy, estimateCost, PRICES } from "./claude.js";
 import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
-import { verifyWebhook, parseIncoming, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
+import { verifyWebhook, parseIncoming, parseStatuses, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
   getLastAlert,
   setLastAlert,
@@ -52,6 +52,8 @@ import {
   getCampaign,
   setCampaign,
   getSalesFreeze,
+  bumpDelivery,
+  getDelivery,
   setSalesFreeze,
   salesFreezeActive,
   heldByFreezeLeads,
@@ -919,6 +921,12 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { paused: isPaused() });
   }
 
+  // מעקב מסירה: כמה הודעות יוצאות מטא באמת מסרה בכל יום, ולמה נכשלו האחרות
+  if (req.method === "GET" && path === "/admin/delivery") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    return send(res, 200, { delivery: getDelivery() });
+  }
+
   // הקפאת מכירה יזומה (מקס, 16.11.2026). נועה ממשיכה לענות לכל מי שכותב
   // אליה; מה שנעצר הוא רק מה שהיא יוזמת: הודעת פתיחה, שלב חימום, תזכורת.
   // POST {days:14,reason:".."} להפעלה · POST {off:true} לשחרור מוקדם.
@@ -1044,6 +1052,8 @@ const server = http.createServer(async (req, res) => {
     }
     // עונים ל-Meta מיד (200) ומעבדים ברקע — מונע retries כפולים
     send(res, 200, { received: true });
+    // סטטוסי מסירה (נמסר / נקרא / נכשל + קוד השגיאה) — נספרים ליום
+    for (const st of parseStatuses(body)) bumpDelivery(st.status, st.code, st.title);
     const messages = parseIncoming(body);
     for (const m of messages) {
       enqueueByPhone(m.from, () => processWhatsApp(m));

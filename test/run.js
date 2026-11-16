@@ -7,7 +7,7 @@ import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
 import { setRuntimeLlmProxy, setRuntimeAnthropicKey, getSalesFreeze, setSalesFreeze, salesFreezeActive, heldByFreezeLeads, updateLead, allLeads, deleteLead } from "../src/store.js";
 import { proactiveBlockedReason, skipMissedOpener } from "../src/drip.js";
 import { matchAutomation } from "../src/automation-skip.js";
-import { parseIncoming } from "../src/whatsapp.js";
+import { parseIncoming, parseStatuses } from "../src/whatsapp.js";
 
 const live = Boolean(config.anthropicKey);
 let pass = 0,
@@ -174,6 +174,16 @@ console.log("גרדריילים דטרמיניסטיים:");
     p[0].type === "interactive" && p[0].text === "אודות המכללה 🏫" && p[1].type === "interactive" && p[1].text === "ייעוץ והרשמה 📝",
     JSON.stringify(p.slice(0, 2)));
   check("parseIncoming: כפתור תבנית → טקסט רגיל", p[2].type === "text" && p[2].text === "כן, מעניין אותי" && p[3].text === "היי");
+  // סטטוסי מסירה: failed נושא את קוד השגיאה של מטא, והודעות נכנסות באותו גוף לא נספרות כסטטוס
+  const sb = { entry: [{ changes: [{ value: { messages: body.entry[0].changes[0].value.messages.slice(3), statuses: [
+    { id: "m1", status: "delivered", recipient_id: "972500000001" },
+    { id: "m2", status: "failed", recipient_id: "972500000002", errors: [{ code: 131049, title: "This message was not delivered to maintain healthy ecosystem engagement." }] },
+  ] } }] }] };
+  const st = parseStatuses(sb);
+  check("parseStatuses: delivered + failed עם קוד שגיאה",
+    st.length === 2 && st[0].status === "delivered" && st[0].code === 0 && st[1].status === "failed" && st[1].code === 131049 && st[1].to === "972500000002",
+    JSON.stringify(st));
+  check("parseStatuses: גוף בלי סטטוסים → ריק, ו-parseIncoming לא מושפע", parseStatuses(body).length === 0 && parseIncoming(sb).length === 1);
 }
 {
   const r = await handleMessage(lead, [], "כמה עולה שנה א'?", ask);
