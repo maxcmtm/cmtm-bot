@@ -390,9 +390,10 @@ export async function registerCampaignLead({ name, phone, sourceValue, ownerId }
   return { ok: true, accountId: accId, created };
 }
 
-// אישור הגעה לשיעור התנסות: מאתר את רשומת "הרשמה לשיעור התנסות" (1008) האחרונה
-// של הליד ומעדכן סטטוס (pcfsystemfield104) ל"אישר הגעה טלפונית" (2)
-export async function confirmTrialAttendance(phone) {
+// אישור/ביטול הגעה לשיעור התנסות: מאתר את רשומת "הרשמה לשיעור התנסות" (1008) האחרונה של הליד
+// ומעדכן סטטוס (pcfsystemfield104): "2" = אישר הגעה טלפונית, "5" = לא מגיע בסוף.
+// בטיחות: רק רשומה שנוצרה ב-45 הימים האחרונים (לא דורסים הרשמה לאירוע ישן), ולא דורסים "הגיע" (3).
+export async function confirmTrialAttendance(phone, status = "2") {
   if (!token()) return { ok: false, reason: "אין טוקן" };
   const accId = await findAccountByPhone(phone);
   if (!accId) return { ok: false, reason: "אין כרטיס תלמיד" };
@@ -402,7 +403,7 @@ export async function confirmTrialAttendance(phone) {
         method: "POST",
         headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify({ objecttype: 1008, page_size: 1,
-          fields: "customobject1008id,pcfsystemfield104",
+          fields: "customobject1008id,pcfsystemfield104,createdon",
           query: `(pcfsystemfield101 = '${accId}')`,
           sort_by: "createdon", sort_type: "desc" }),
       });
@@ -410,13 +411,16 @@ export async function confirmTrialAttendance(phone) {
       if (!r.ok) return { ok: false, reason: `query ${r.status}` };
       const reg = ((await r.json())?.data?.Data || [])[0];
       if (!reg) return { ok: false, reason: "אין רשומת הרשמה לשיעור התנסות" };
+      const age = Date.now() - new Date(reg.createdon).getTime();
+      if (!(age < 45 * 86400000)) return { ok: false, reason: "רשומת ההרשמה האחרונה ישנה (אירוע קודם)" };
+      if (String(reg.pcfsystemfield104) === "3") return { ok: false, reason: "כבר סומן שהגיע" };
       const u = await fetch(`${BASE}/api/record/1008/${reg.customobject1008id}`, {
         method: "PUT",
         headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ pcfsystemfield104: "2" }), // אישר הגעה טלפונית
+        body: JSON.stringify({ pcfsystemfield104: String(status) }),
       });
       if (!u.ok) return { ok: false, reason: `update ${u.status}` };
-      console.log(`✅ אישור הגעה עודכן ברשומת ההרשמה (${phone})`);
+      console.log(`${String(status) === "5" ? "🚫 ביטול" : "✅ אישור"} הגעה עודכן ברשומת ההרשמה (${phone})`);
       return { ok: true };
     } catch (e) { await new Promise((x) => setTimeout(x, 5000)); }
   }

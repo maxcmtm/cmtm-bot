@@ -298,10 +298,13 @@ async function processWhatsApp(msg) {
     }
     return;
   }
-  // ביטול הגעה — נרשם על הליד לרשימת ההגעה, בלי CRM
+  // ביטול הגעה — נרשם על הליד לרשימת ההגעה + "לא מגיע בסוף" ברשומת ההרשמה ב-CRM (אם יש רשומה עדכנית)
   if (decision._guardrail === "event_decline") {
     updateLead(msg.from, { declinedTs: Date.now(), confirmedTs: 0, attendanceText: (msg.text || "").slice(0, 60) });
     console.log(`🚫 ביטול הגעה: ${msg.name || msg.from}`);
+    confirmTrialAttendance(msg.from, "5")
+      .then((r) => { if (!r.ok) console.log(`ℹ️ ביטול הגעה לא עודכן ב-CRM (${msg.from}): ${r.reason}`); })
+      .catch((e) => console.error("[decline]", e.message));
     return;
   }
   // אישור הגעה לאירוע — נרשם על הליד (רשימה ב-/admin/attendance) + רשומת "הרשמה לשיעור התנסות" ב-CRM
