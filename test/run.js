@@ -6,7 +6,7 @@ import { handleMessage, humanizeTone, detectAttendance, detectRegistration, matc
 import { askClaude, callMessages, activeLlmProxy } from "../src/claude.js";
 import { setRuntimeLlmProxy, setRuntimeAnthropicKey, getSalesFreeze, setSalesFreeze, salesFreezeActive, heldByFreezeLeads, updateLead, allLeads, deleteLead } from "../src/store.js";
 import { proactiveBlockedReason, skipMissedOpener } from "../src/drip.js";
-import { matchAutomation } from "../src/automation-skip.js";
+import { matchAutomation, staysUnsubscribed } from "../src/automation-skip.js";
 import { parseIncoming, parseStatuses } from "../src/whatsapp.js";
 
 const live = Boolean(config.anthropicKey);
@@ -75,6 +75,16 @@ console.log("גרדריילים דטרמיניסטיים:");
   for (const t of no) all.push((await handleMessage(lead, [], t, ask)).intent !== "unsubscribe" ? "" : `"${t}" זוהה בטעות`);
   const bad = all.filter(Boolean);
   check("הסרה: מילה שלמה בלבד (הסרטון ≠ הסר)", bad.length === 0, bad.join(", "));
+}
+{
+  // מי שביקש הסרה נשאר מוסר אחרי "תודה"; חוזר רק בבקשה מפורשת
+  const cases = [
+    ["unsubscribed", {}, "תודה", true], ["unsubscribed", {}, "בברכה והצלחה!!!🙏", true], ["unsubscribed", { intent: "question" }, "אפשר לקבל טיפול אצלכם?", true],
+    ["unsubscribed", { handoff: true }, "כן, דברו איתי", false], ["unsubscribed", {}, "בטעות לחצתי", false], ["unsubscribed", {}, "נלחץ לי בטעות", false],
+    ["active_chat", {}, "תודה", false], ["hot", {}, "תודה", false],
+  ];
+  const bad = cases.filter(([st, d, tx, want]) => staysUnsubscribed(st, d, tx) !== want).map((c) => c[2]);
+  check("מוסר נשאר מוסר אחרי 'תודה', וחוזר רק בבקשה מפורשת", bad.length === 0, bad.join(", "));
 }
 {
   // דילוג על הודעות שאוטומציית n8n עונה עליהן (מניעת תשובה כפולה)

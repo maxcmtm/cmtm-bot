@@ -64,7 +64,7 @@ import {
   setBroadcastJob,
 } from "./store.js";
 import { startSequence, startDripScheduler } from "./drip.js";
-import { matchAutomation, automationStatus } from "./automation-skip.js";
+import { matchAutomation, automationStatus, staysUnsubscribed } from "./automation-skip.js";
 import { alertAdmin, runWatchdog } from "./watchdog.js";
 import { handleCrmEvent } from "./crm-events.js";
 
@@ -233,10 +233,12 @@ async function processWhatsApp(msg) {
   };
   if (decision.lead_summary) updFields.summary = decision.lead_summary;
   const wasHot = lead.status === "hot";
+  const keepUnsub = staysUnsubscribed(lead.status, decision, msg.text);
   const l = updateLead(msg.from, updFields);
   let status = "active_chat";
   if (decision.intent === "unsubscribe") status = "unsubscribed";
   else if (studentCode) status = "student"; // תלמיד קיים — לא ליד חם ולא בחימום
+  else if (keepUnsub) status = "unsubscribed"; // ביקש הסרה — "תודה" אחריה לא מחזיר אותו לתפוצות
   else if (decision.handoff || l.score >= 70) status = "hot";
   updateLead(msg.from, { status });
   const becameHot = status === "hot" && !wasHot;

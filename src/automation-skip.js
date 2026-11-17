@@ -130,6 +130,15 @@ export function isUnsubscribeText(text) {
   return g.phrases.some((p) => containsWholePhrase(text, p));
 }
 
+// מי שביקש הסרה נשאר מוסר גם אם אחר כך כתב "תודה" / "יום טוב" / שאלה כללית (17/11: 17 מוסרים חזרו
+// להיות פעילים בגלל "תודה"). חוזר לרשימות רק מי שביקש במפורש: העברה ליועצת, או "נלחץ בטעות".
+const REOPT_RE = /בטעות|נלחץ|נלחצה/;
+export function staysUnsubscribed(prevStatus, decision = {}, text = "") {
+  if (prevStatus !== "unsubscribed") return false;
+  if (decision.handoff) return false;
+  return !REOPT_RE.test(text || "");
+}
+
 // הודעה נכנסת → הקבוצה שהאוטומציה תענה עליה, או null אם נועה צריכה לענות
 export function matchAutomation(text, history = []) {
   const lastBot = [...history].reverse().find((m) => m.role === "assistant")?.content || "";
