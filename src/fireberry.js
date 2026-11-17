@@ -218,6 +218,43 @@ export async function isOptedOutByPhone(phone) {
 }
 
 // סימון "הוסר מרשימת דיוור = כן" ב-CRM (כשמישהו מבקש הסרה בבוט)
+// כל הכרטיסים של אותו טלפון (יש כפולים): בהסרה מסמנים את כולם, לא רק את הראשון שנמצא.
+// (17/11: ל-47 מבקשי הסרה נשאר כרטיס כפול לא מסומן, כי גם האוטומציה וגם נועה סימנו כרטיס אחד בלבד)
+export async function findAccountsByPhone(phone) {
+  if (!token()) return [];
+  const local = waToIsraeli(phone);
+  if (!/^0\d{8,9}$/.test(local)) return []; // מספר ריק/זר/חלקי עלול להתאים לכרטיסי זבל — לא מחפשים
+  const intl = "972" + local.slice(1);
+  const cands = [local, intl, "+" + intl, local.slice(0, 3) + "-" + local.slice(3)];
+  const query = cands.map((c) => `(telephone1 = '${c}')`).join(" OR ");
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await fetch(`${BASE}/api/query`, {
+        method: "POST",
+        headers: { tokenid: token(), "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ objecttype: 1, page_size: 20, fields: "accountid,telephone1,pcfsystemfield274", query }),
+      });
+      if (r.status === 429) { await new Promise((x) => setTimeout(x, 15000)); continue; }
+      if (!r.ok) return [];
+      return (await r.json())?.data?.Data || [];
+    } catch {
+      await new Promise((x) => setTimeout(x, 5000));
+    }
+  }
+  return [];
+}
+
+export async function markOptedOutByPhone(phone) {
+  const recs = await findAccountsByPhone(phone);
+  let marked = 0;
+  for (const a of recs) {
+    if (!a.accountid || a.pcfsystemfield274 === "1" || a.pcfsystemfield274 === "כן") continue;
+    const r = await markOptedOut(a.accountid);
+    if (r.ok) marked++;
+  }
+  return { found: recs.length, marked };
+}
+
 export async function markOptedOut(accountId) {
   if (!token() || !accountId) return { skipped: true };
   try {

@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, activeLlmProxy, estimateCost, PRICES } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, markOptedOutByPhone, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, parseStatuses, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
   getLastAlert,
@@ -181,8 +181,12 @@ async function processWhatsApp(msg) {
     if (isUnsub) {
       // גיבוי לאוטומציה: מסמנים "הוסר מרשימת דיוור" גם מכאן (כתיבה כפולה של אותו ערך לא מזיקה)
       (async () => {
-        const accId = lead.fireberryId || (await findAccountByPhone(msg.from));
-        if (accId) await markOptedOut(accId);
+        // ליד: מסמנים את כל הכרטיסים של הטלפון (כולל כפולים). תלמיד/מספר זר/לא נמצא: כרטיס אחד, כמו קודם.
+        const res = studentCode ? { found: 0 } : await markOptedOutByPhone(msg.from);
+        if (!res.found) {
+          const accId = lead.fireberryId || (await findAccountByPhone(msg.from));
+          if (accId) await markOptedOut(accId);
+        }
       })().catch((e) => console.error("[fireberry] optout:", e.message));
     }
     return;
