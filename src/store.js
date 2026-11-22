@@ -363,7 +363,7 @@ export function updateLead(phone, fields = {}) {
   if (fields.scoreDelta) l.score += fields.scoreDelta;
   // רשימת היתר: שדה שלא רשום כאן נזרק בשקט. (16.11: heldByFreeze נפל בדיוק
   // כך — הסימון נכתב, לא נשמר, והליד היה מקבל הודעת פתיחה בדיעבד בסוף ההקפאה.)
-  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText", "campaignTs", "campaignName", "campaignVia", "heldByFreeze"]) {
+  for (const k of ["status", "seqStep", "lastInboundTs", "lastDripTs", "name", "fireberryId", "nudgedTs", "lastIntent", "summary", "fireberrySummaryId", "humanUntil", "confirmedTs", "declinedTs", "attendanceText", "campaignTs", "campaignName", "campaignVia", "heldByFreeze", "source", "lpPrefs"]) {
     if (k in fields) l[k] = fields[k];
   }
   save();

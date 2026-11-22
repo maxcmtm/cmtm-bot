@@ -69,6 +69,9 @@ import { alertAdmin, runWatchdog } from "./watchdog.js";
 import { handleCrmEvent } from "./crm-events.js";
 
 // המרת טלפון לפורמט וואטסאפ בינלאומי: 0546641264 → 972546641264
+// מנהל לקוח "תרפיית מימדים" ב-Fireberry — לשם עוברים לידים שחוזרים ממבצעים (ממתינים לחלוקה)
+const TM_OWNER_ID = "e275bd1b-f75b-4177-916c-cbc5299dc59f";
+const lpIpHits = new Map(); // ip -> [ts] (הגבלת קצב לטופס דף הנחיתה)
 const normalizePhone = (p) => {
   let d = String(p || "").replace(/\D/g, "");
   if (d.startsWith("972")) return d;
@@ -669,7 +672,7 @@ const server = http.createServer(async (req, res) => {
     const starts = [getCampaign()?.startedTs, ...listCampaigns().map((c) => c.startedTs)].filter(Boolean);
     const since = Number(url.searchParams.get("since") || 0) || (starts.length ? Math.min(...starts) : Date.now() - 48 * 3600000);
     const rows = allLeads().filter((lx) => lx.campaignTs && lx.campaignTs >= since)
-      .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, via: lx.campaignVia === "reply" ? "תשובה כתובה" : "כפתור", fireberryId: lx.fireberryId || "", status: lx.status }))
+      .map((lx) => ({ name: lx.name || "", phone: waToIsraeli(lx.id), time: new Date(lx.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: lx.campaignName, via: lx.campaignVia === "reply" ? "תשובה כתובה" : lx.campaignVia === "landing" ? "דף נחיתה" : "כפתור", fireberryId: lx.fireberryId || "", status: lx.status }))
       .sort((a, b) => a.time.localeCompare(b.time));
     if (url.searchParams.get("format") === "csv") {
       const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -1068,6 +1071,71 @@ const server = http.createServer(async (req, res) => {
       enqueueByPhone(m.from, () => processWhatsApp(m));
     }
     return;
+  }
+
+  // ליד מדף נחיתה של מבצע (בלאק פריידי 11.26 ואילך). נקרא מ-Pages Function עם הסוד, לא מהדפדפן.
+  // אותו מסלול כמו לחיצה על כפתור קמפיין: כרטיס ב-CRM עם "הגיע ממבצע" (כולל ההעדפות), פנייה חוזרת,
+  // דירוג חם, מנהל לקוח = תרפיית מימדים, והתראה לסמדר. הליד נשמר אצלנו בלי רצף חימום (seqStep 0).
+  if (req.method === "POST" && path === "/lp/lead") {
+    if (req.headers["x-bot-secret"] !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    let body;
+    try { body = JSON.parse((await readBody(req)) || "{}"); } catch { return send(res, 400, { error: "invalid json" }); }
+    const phone = normalizePhone(body.phone);
+    if (!/^9725\d{8}$/.test(phone)) return send(res, 400, { error: "טלפון לא תקין" });
+    const name = String(body.name || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    if (name.length < 2) return send(res, 400, { error: "שם חסר" });
+    // הגבלת קצב לפי IP (נגד ספאם שיציף את ה-CRM ואת סמדר)
+    const ip = String(body.ip || "").slice(0, 64);
+    const now = Date.now();
+    if (ip) {
+      const hits = (lpIpHits.get(ip) || []).filter((t) => now - t < 3600000);
+      if (hits.length >= 6) return send(res, 429, { error: "יותר מדי ניסיונות" });
+      hits.push(now); lpIpHits.set(ip, hits);
+    }
+    const tag = String(body.campaign || "בלאק פריידי 7900").slice(0, 40);
+    const prefs = [body.time, body.format, body.payments ? `${body.payments} תש'` : "", body.intent]
+      .map((x) => String(x || "").trim().slice(0, 30)).filter(Boolean).join(" | ");
+    const existed = allLeads().some((x) => x.id === phone);
+    const before = getLead(phone, name); // ליד חדש נוצר עם seqStep 0 → לא נכנס לרצף החימום
+    const dup = before.campaignVia === "landing" && before.campaignName === tag && now - (before.campaignTs || 0) < 6 * 3600000;
+    updateLead(phone, {
+      ...(name && !before.name ? { name } : {}),
+      ...(existed ? {} : { source: "landing" }),
+      status: before.status === "student" ? "student" : "hot",
+      campaignTs: now, campaignName: tag, campaignVia: "landing", lpPrefs: prefs,
+    });
+    send(res, 200, { ok: true, duplicate: dup });
+    if (dup) { console.log(`🖤 דף נחיתה (כפול, בלי התראה): ${name} ${phone}`); return; }
+    pushAssistantTurn(phone, `[השאיר/ה פרטים בדף ${tag}: ${prefs || "בלי העדפות"}. יועץ לימודים אמור לחזור אליו/ה]`);
+    const student = studentStatus(phone);
+    console.log(`🖤 ליד מדף נחיתה "${tag}": ${name} ${phone} | ${prefs}${student ? " | תלמיד/ה קיים/ת" : ""}`);
+    registerCampaignLead({ name, phone, sourceValue: `${tag} | ${prefs}`.slice(0, 120), ownerId: body.ownerId || TM_OWNER_ID })
+      .then((r) => { if (r?.accountId) updateLead(phone, { fireberryId: r.accountId }); if (r && !r.ok && !r.skipped) logFailure({ phone, name, error: `lp/lead: CRM ${r.reason || "נכשל"}`, ts: Date.now() }); })
+      .catch((e) => { console.error("[lp/lead]", e.message); logFailure({ phone, name, error: `lp/lead: ${e.message}`, ts: Date.now() }); });
+    if (getAlertPhone()) {
+      sendTemplate(getAlertPhone(), "hot_lead_alert", [
+        `🖤 ${name}${student ? " (תלמיד/ה קיים/ת)" : ""}`,
+        waToIsraeli(phone),
+        `${tag} מדף הנחיתה: ${prefs}`.slice(0, 120),
+      ]).catch(() => {});
+    }
+    return;
+  }
+
+  // רשימת הלידים מדפי נחיתה (לסמדר / לדוח) — ?secret=&format=csv&campaign=
+  if (req.method === "GET" && path === "/admin/lp-leads") {
+    if (url.searchParams.get("secret") !== config.webhookSecret) return send(res, 401, { error: "unauthorized" });
+    const camp = url.searchParams.get("campaign") || "";
+    const rows = allLeads().filter((x) => x.campaignVia === "landing" && (!camp || x.campaignName === camp))
+      .sort((a, b) => (b.campaignTs || 0) - (a.campaignTs || 0))
+      .map((x) => ({ name: x.name || "", phone: waToIsraeli(x.id), time: new Date(x.campaignTs).toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" }), campaign: x.campaignName, prefs: x.lpPrefs || "", fireberryId: x.fireberryId || "", status: x.status }));
+    if (url.searchParams.get("format") === "csv") {
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = "﻿" + ["שם,טלפון,זמן,מבצע,העדפות,כרטיס,סטטוס", ...rows.map((r) => [r.name, r.phone, r.time, r.campaign, r.prefs, r.fireberryId, r.status].map(esc).join(","))].join("\n");
+      res.writeHead(200, { "content-type": "text/csv; charset=utf-8" });
+      return res.end(csv);
+    }
+    return send(res, 200, { count: rows.length, rows });
   }
 
   // כניסת ליד חדש לרצף החימום (טופס אתר / Fireberry / Make)

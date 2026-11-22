@@ -11,15 +11,25 @@ function isUnsubscribe(text) {
   return isUnsubscribeText(text);
 }
 
+// מחירי מבצע שפורסמו בתפוצה (מותר לנקוב בהם עד תאריך התפוגה, ורק בהם)
+// בלאק פריידי 11.26: שנה א' 7,900 במקום 10,400 (חיסכון 2,500), עד 27.11 14:00 → פג ב-28.11
+const PROMO_AMOUNTS = [
+  { amounts: [7900, 10400, 2500], until: Date.parse("2026-11-28T00:00:00+02:00") },
+];
+function isActivePromoAmount(num, now = Date.now()) {
+  return PROMO_AMOUNTS.some((p) => now < p.until && p.amounts.includes(num));
+}
+
 // רשת ביטחון: לתפוס אם המודל בטעות נקב במחיר שנה א' (₪ ליד מספר 3-5 ספרות)
 // חריג: סכומי סבסוד/מימון/מלגה (למשל "סבסוד עד 5,500 ₪ למילואים") מותרים — הם לא מחיר הקורס
-function mentionsYearOnePrice(text) {
+export function mentionsYearOnePrice(text, now = Date.now()) {
   if (!text) return false;
   const re = /(\d[\d,]{2,})\s*(₪|שקל|ש"ח|שח)/g;
   let m;
   while ((m = re.exec(text)) !== null) {
     const num = Number(m[1].replace(/[^\d]/g, ""));
     if (num < 1000) continue; // 200-400 (מחיר טיפול) ו-400 (דמי הרשמה) מותרים
+    if (isActivePromoAmount(num, now)) continue; // מחיר מבצע שפורסם בתפוצה ועדיין בתוקף
     const ctx = text.slice(Math.max(0, m.index - 50), m.index + m[0].length + 30);
     if (/סבסוד|מימון|מלגה|קרן|החזר/.test(ctx)) continue; // סכום הטבה, לא מחיר קורס
     return true;
