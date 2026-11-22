@@ -1095,6 +1095,8 @@ const server = http.createServer(async (req, res) => {
     const tag = String(body.campaign || "בלאק פריידי 7900").slice(0, 40);
     const prefs = [body.time, body.format, body.payments ? `${body.payments} תש'` : "", body.intent]
       .map((x) => String(x || "").trim().slice(0, 30)).filter(Boolean).join(" | ");
+    // בדיקת שרשרת מהדף (מפתח בדיקה ב-Cloudflare): לא נוגעים בלידים, ב-CRM או בהתראות
+    if (body.dryRun === true) return send(res, 200, { ok: true, dryRun: true, phone, tag, prefs });
     const existed = allLeads().some((x) => x.id === phone);
     const before = getLead(phone, name); // ליד חדש נוצר עם seqStep 0 → לא נכנס לרצף החימום
     const dup = before.campaignVia === "landing" && before.campaignName === tag && now - (before.campaignTs || 0) < 6 * 3600000;
