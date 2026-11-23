@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { handleMessage } from "./brain.js";
 import { summarizeLead, activeModel, activeAnthropicKey, activeLlmProxy, estimateCost, PRICES } from "./claude.js";
-import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, markOptedOutByPhone, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
+import { updateLead as fireberryUpdate, findAccountByPhone, upsertBotSummary, touchReturningLead, isOptedOutByPhone, markOptedOut, markOptedOutByPhone, createAccount, confirmTrialAttendance, markHotLead, registerCampaignLead, logConversation, fireberryErrors, waToIsraeli, studentStatus, STUDENT_STATUS_NAMES, studentSetSize, getStudentInfo } from "./fireberry.js";
 import { verifyWebhook, parseIncoming, parseStatuses, sendText, sendTemplate, activeToken, sendTypingIndicator, downloadMedia, transcribeAudio, getNumberQuality } from "./whatsapp.js";
 import {
   getLastAlert,
@@ -1093,6 +1093,8 @@ const server = http.createServer(async (req, res) => {
       hits.push(now); lpIpHits.set(ip, hits);
     }
     const tag = String(body.campaign || "בלאק פריידי 7900").slice(0, 40);
+    // ערך קבוע ל"הגיע ממבצע" כדי שאפשר יהיה לסנן לפיו ב-CRM (מקס 23.11: "blackfriday"); ההעדפות נרשמות בהיסטוריה של הכרטיס
+    const source = String(body.source || "").replace(/[^\w-]/g, "").slice(0, 40);
     const prefs = [body.time, body.format, body.payments ? `${body.payments} תש'` : "", body.intent]
       .map((x) => String(x || "").trim().slice(0, 30)).filter(Boolean).join(" | ");
     // בדיקת שרשרת מהדף (מפתח בדיקה ב-Cloudflare): לא נוגעים בלידים, ב-CRM או בהתראות
@@ -1111,8 +1113,13 @@ const server = http.createServer(async (req, res) => {
     pushAssistantTurn(phone, `[השאיר/ה פרטים בדף ${tag}: ${prefs || "בלי העדפות"}. יועץ לימודים אמור לחזור אליו/ה]`);
     const student = studentStatus(phone);
     console.log(`🖤 ליד מדף נחיתה "${tag}": ${name} ${phone} | ${prefs}${student ? " | תלמיד/ה קיים/ת" : ""}`);
-    registerCampaignLead({ name, phone, sourceValue: `${tag} | ${prefs}`.slice(0, 120), ownerId: body.ownerId || TM_OWNER_ID })
-      .then((r) => { if (r?.accountId) updateLead(phone, { fireberryId: r.accountId }); if (r && !r.ok && !r.skipped) logFailure({ phone, name, error: `lp/lead: CRM ${r.reason || "נכשל"}`, ts: Date.now() }); })
+    registerCampaignLead({ name, phone, sourceValue: source || `${tag} | ${prefs}`.slice(0, 120), ownerId: body.ownerId || TM_OWNER_ID })
+      .then((r) => {
+        if (r?.accountId) {
+          updateLead(phone, { fireberryId: r.accountId });
+          if (source) logConversation(r.accountId, `השאיר/ה פרטים בדף ${tag}: ${prefs || "בלי העדפות"}`, "יועץ לימודים יחזור בהקדם", `דף נחיתה: ${tag}`).catch(() => {});
+        }
+        if (r && !r.ok && !r.skipped) logFailure({ phone, name, error: `lp/lead: CRM ${r.reason || "נכשל"}`, ts: Date.now() }); })
       .catch((e) => { console.error("[lp/lead]", e.message); logFailure({ phone, name, error: `lp/lead: ${e.message}`, ts: Date.now() }); });
     if (getAlertPhone()) {
       sendTemplate(getAlertPhone(), "hot_lead_alert", [
